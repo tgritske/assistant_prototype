@@ -84,6 +84,9 @@ export default function App() {
 
   const canDispatch = Boolean(state.form.incident_type && state.form.location);
 
+  // false = expanded (demo mode); change to true for production default
+  const [sidebarOpen, setSidebarOpen] = useState(true);
+
   return (
     <div className="h-screen flex flex-col bg-[var(--color-bg)]">
       <StatusBar
@@ -110,7 +113,10 @@ export default function App() {
         </div>
       )}
 
-      <main className="flex-1 min-h-0 grid grid-cols-[260px_1fr_360px_420px]">
+      <main
+        className="flex-1 min-h-0 grid"
+        style={{ gridTemplateColumns: `${sidebarOpen ? 260 : 40}px 1fr 360px 420px` }}
+      >
         <ScenarioPicker
           scenarios={state.scenarios}
           inCall={state.inCall}
@@ -119,6 +125,8 @@ export default function App() {
           onStop={stopCall}
           onLiveMic={startLiveMic}
           micActive={isRecording}
+          collapsed={!sidebarOpen}
+          onToggleCollapse={() => setSidebarOpen((v) => !v)}
         />
 
         <TranscriptPanel

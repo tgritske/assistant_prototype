@@ -1,5 +1,5 @@
 import { motion } from "framer-motion";
-import { Play, Square, Mic } from "lucide-react";
+import { Play, Square, Mic, ChevronLeft, ChevronRight } from "lucide-react";
 import type { ScenarioSummary } from "../types/dispatch";
 import { cn } from "../lib/utils";
 
@@ -11,6 +11,8 @@ interface Props {
   onStop: () => void;
   onLiveMic?: () => void;
   micActive?: boolean;
+  collapsed?: boolean;
+  onToggleCollapse?: () => void;
 }
 
 const catColors: Record<string, string> = {
@@ -45,21 +47,56 @@ export function ScenarioPicker({
   onStop,
   onLiveMic,
   micActive,
+  collapsed = false,
+  onToggleCollapse,
 }: Props) {
   const liveMicMode = inCall && !activeId;
+
+  if (collapsed) {
+    return (
+      <aside className="flex flex-col h-full bg-[var(--color-bg-elevated)] border-r border-[var(--color-border)] min-h-0 items-center pt-2">
+        <button
+          onClick={onToggleCollapse}
+          className="p-1.5 rounded text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-[var(--color-bg-panel)]"
+          title="Expand panel"
+        >
+          <ChevronRight size={16} />
+        </button>
+        <div className="flex-1 flex items-center justify-center">
+          <span
+            className="text-[10px] font-semibold tracking-[0.14em] uppercase text-[var(--color-text-dim)] select-none"
+            style={{ writingMode: "vertical-rl", transform: "rotate(180deg)" }}
+          >
+            Scenarios
+          </span>
+        </div>
+      </aside>
+    );
+  }
 
   return (
     <aside className="flex flex-col h-full bg-[var(--color-bg-elevated)] border-r border-[var(--color-border)] min-h-0">
       <div className="flex items-center justify-between px-4 py-2.5 border-b border-[var(--color-border)]">
-        <div className="text-[11px] font-semibold tracking-[0.14em] uppercase text-[var(--color-text-muted)]">
-          {liveMicMode ? (
-            <span className="flex items-center gap-1.5 text-red-400">
-              <Mic size={11} className="animate-pulse" />
-              Live Mic
-            </span>
-          ) : (
-            "Demo Scenarios"
+        <div className="flex items-center gap-2">
+          {onToggleCollapse && (
+            <button
+              onClick={onToggleCollapse}
+              className="p-0.5 rounded text-[var(--color-text-dim)] hover:text-[var(--color-text-muted)] hover:bg-[var(--color-bg-panel)]"
+              title="Collapse panel"
+            >
+              <ChevronLeft size={14} />
+            </button>
           )}
+          <div className="text-[11px] font-semibold tracking-[0.14em] uppercase text-[var(--color-text-muted)]">
+            {liveMicMode ? (
+              <span className="flex items-center gap-1.5 text-red-400">
+                <Mic size={11} className="animate-pulse" />
+                Live Mic
+              </span>
+            ) : (
+              "Demo Scenarios"
+            )}
+          </div>
         </div>
         {inCall && (
           <button
