@@ -1,0 +1,13 @@
+# Python
+venv
+backend/.venv
+backend/__pycache__/
+backend/app/__pycache__/
+backend/.env
+backend/piper_models/
+
+# Node
+frontend/node_modules/
+frontend/dist/
+frontend/.env
+
