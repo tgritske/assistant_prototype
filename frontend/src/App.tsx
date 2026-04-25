@@ -115,7 +115,7 @@ export default function App() {
 
       <main
         className="flex-1 min-h-0 grid"
-        style={{ gridTemplateColumns: `${sidebarOpen ? 260 : 40}px 1fr 360px 420px` }}
+        style={{ gridTemplateColumns: `${sidebarOpen ? 260 : 40}px 1fr 360px minmax(0,33%)` }}
       >
         <ScenarioPicker
           scenarios={state.scenarios}
