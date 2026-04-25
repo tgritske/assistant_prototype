@@ -22,7 +22,7 @@ export function formatPhone(v: string | null | undefined): string {
   return v;
 }
 
-export function priorityTone(p: string | null | undefined) {
+export function priorityTone(p: "P1" | "P2" | "P3" | "P4") {
   switch (p) {
     case "P1":
       return { color: "var(--color-p1)", label: "IMMEDIATE LIFE THREAT", bg: "rgba(239,68,68,0.14)" };
@@ -32,8 +32,6 @@ export function priorityTone(p: string | null | undefined) {
       return { color: "var(--color-p3)", label: "URGENT", bg: "rgba(234,179,8,0.14)" };
     case "P4":
       return { color: "var(--color-p4)", label: "NON-URGENT", bg: "rgba(16,185,129,0.14)" };
-    default:
-      return { color: "var(--color-text-muted)", label: "Classifying…", bg: "rgba(138,146,168,0.08)" };
   }
 }
 
