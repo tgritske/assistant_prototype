@@ -67,9 +67,12 @@ class WhisperService:
     stays "provisional" until it ages out of the window.
     """
 
+    name = "whisper"
+
     def __init__(self):
         log.info("Loading Whisper model size=%s compute=%s device=%s",
                  MODEL_SIZE, COMPUTE_TYPE, DEVICE)
+        self.model_name = MODEL_SIZE
         self.model = WhisperModel(
             MODEL_SIZE,
             device=DEVICE,

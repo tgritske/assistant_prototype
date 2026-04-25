@@ -2,8 +2,6 @@
 
 Works for any service that exposes an OpenAI-shaped `/v1/chat/completions`
 endpoint with function-calling support. Tested against:
-    - Groq (https://api.groq.com/openai/v1)
-    - OpenRouter (https://openrouter.ai/api/v1)
     - Ollama (http://localhost:11434/v1)
 
 Uses OpenAI-style tool_use, which maps trivially from the Claude schema in

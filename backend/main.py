@@ -34,10 +34,8 @@ from services.form_normalizer import normalize_extraction
 from services.llm_backend import LLMBackend, build_backend
 from services.realtime_extractor import extract_realtime_signal
 from services.tts_service import COMMON_DISPATCHER_PHRASES, get_tts_service
-from services.whisper_service import (
-    SAMPLE_RATE,
-    get_whisper_service,
-)
+from services.transcriber import get_transcriber
+from services.whisper_service import SAMPLE_RATE
 
 load_dotenv()
 
@@ -174,7 +172,7 @@ class CallSession:
         self.language: Optional[str] = None
         self.input_mode: Literal["live_text", "live_audio", "scenario"] = "live_text"
         self.llm: Optional[LLMBackend] = get_llm()
-        self.whisper = get_whisper_service()
+        self.transcriber = get_transcriber()
         self.tts = get_tts_service()
         self._claude_task: Optional[asyncio.Task] = None
         self._claude_rerun_queued = False
@@ -586,7 +584,7 @@ class CallSession:
                 # Last 30 words give Whisper sentence context and spelling cues
                 prompt = " ".join(self.full_transcript.split()[-30:]) or None
 
-                segments, detected_lang = await self.whisper.transcribe_array(
+                segments, detected_lang = await self.transcriber.transcribe_array(
                     audio_chunk,
                     language=lang_hint,
                     initial_prompt=prompt,
@@ -706,7 +704,7 @@ class CallSession:
             # time per step == max(STEP_SEC, inference_time) instead of sum.
             sleep_task = asyncio.create_task(asyncio.sleep(STEP_SEC))
             transcribe_task = asyncio.create_task(
-                self.whisper.transcribe_array(
+                self.transcriber.transcribe_array(
                     chunk,
                     language=language_hint,
                     initial_prompt=prompt,
@@ -1092,11 +1090,12 @@ async def _handle_text(session: CallSession, raw: str):
 
 @app.on_event("startup")
 async def warmup():
-    log.info("Warming up Whisper…")
+    transcriber = get_transcriber()
+    log.info("Warming up transcriber: %s…", transcriber.name)
     try:
-        await get_whisper_service().warmup()
+        await transcriber.warmup()
     except Exception as e:
-        log.warning("Whisper warm-up skipped: %s", e)
+        log.warning("Transcriber warm-up skipped: %s", e)
     log.info("Ready.")
 
 
