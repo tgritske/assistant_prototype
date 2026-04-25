@@ -1,0 +1,76 @@
+@import "tailwindcss";
+
+@theme {
+  --color-bg: #0a0b12;
+  --color-bg-elevated: #11131c;
+  --color-bg-panel: #161826;
+  --color-border: #242738;
+  --color-border-strong: #333852;
+  --color-text: #e4e7ef;
+  --color-text-muted: #8a92a8;
+  --color-text-dim: #5a6178;
+  --color-accent: #3b82f6;
+  --color-accent-soft: rgba(59, 130, 246, 0.12);
+  --color-ai-bg: rgba(59, 130, 246, 0.09);
+  --color-ai-border: rgba(59, 130, 246, 0.35);
+  --color-p1: #ef4444;
+  --color-p2: #f59e0b;
+  --color-p3: #eab308;
+  --color-p4: #10b981;
+  --color-live: #10b981;
+  --color-warn: #f59e0b;
+  --color-critical: #ef4444;
+
+  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-mono: ui-monospace, "Menlo", "SF Mono", monospace;
+}
+
+* { box-sizing: border-box; }
+html, body, #root { height: 100%; }
+body {
+  margin: 0;
+  font-family: var(--font-sans);
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-feature-settings: "cv11", "ss01";
+  -webkit-font-smoothing: antialiased;
+}
+
+/* custom scrollbars */
+*::-webkit-scrollbar { width: 8px; height: 8px; }
+*::-webkit-scrollbar-thumb {
+  background: var(--color-border-strong);
+  border-radius: 4px;
+}
+*::-webkit-scrollbar-track { background: transparent; }
+
+/* subtle pulse for live states */
+@keyframes pulse-ring {
+  0% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.55); }
+  70% { box-shadow: 0 0 0 10px rgba(16, 185, 129, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); }
+}
+.pulse-ring { animation: pulse-ring 2s infinite; }
+
+/* priority emphasis */
+@keyframes urgent-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.55); }
+  50% { box-shadow: 0 0 0 6px rgba(239, 68, 68, 0); }
+}
+.pulse-urgent { animation: urgent-pulse 1.3s infinite; }
+
+/* keyword highlight */
+.kw-highlight {
+  background: rgba(245, 158, 11, 0.18);
+  color: #fbbf24;
+  border-radius: 3px;
+  padding: 1px 4px;
+  font-weight: 500;
+}
+
+/* ai-filled field flash */
+@keyframes ai-fill-flash {
+  0% { background: rgba(59, 130, 246, 0.4); }
+  100% { background: var(--color-ai-bg); }
+}
+.ai-flash { animation: ai-fill-flash 0.7s ease-out; }

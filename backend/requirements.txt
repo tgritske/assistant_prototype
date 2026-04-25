@@ -1,0 +1,12 @@
+fastapi==0.115.5
+uvicorn[standard]==0.32.1
+anthropic==0.42.0
+openai==2.32.0
+faster-whisper==1.1.0
+edge-tts==7.2.8
+pydantic==2.10.3
+python-multipart==0.0.19
+numpy==1.26.4
+websockets==13.1
+python-dotenv==1.0.1
+requests==2.33.1
