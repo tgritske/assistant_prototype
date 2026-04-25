@@ -1,3 +1,4 @@
+import { useRef, useEffect } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { Send, Sparkles, User } from "lucide-react";
 import type { FormFields } from "../types/dispatch";
@@ -93,6 +94,7 @@ export function FormPanel({
         <Field
           label="Location"
           name="location"
+          type="textarea"
           value={form.location ?? ""}
           aiFilled={aiFilled.has("location")}
           manualEdit={manualEdits.has("location")}
@@ -182,6 +184,7 @@ export function FormPanel({
         <Field
           label="Hazards"
           name="hazards"
+          type="textarea"
           value={form.hazards ?? ""}
           aiFilled={aiFilled.has("hazards")}
           manualEdit={manualEdits.has("hazards")}
@@ -191,6 +194,7 @@ export function FormPanel({
         <Field
           label="Suspect Description"
           name="suspect_description"
+          type="textarea"
           value={form.suspect_description ?? ""}
           aiFilled={aiFilled.has("suspect_description")}
           manualEdit={manualEdits.has("suspect_description")}
@@ -200,6 +204,7 @@ export function FormPanel({
         <Field
           label="Vehicle Info"
           name="vehicle_info"
+          type="textarea"
           value={form.vehicle_info ?? ""}
           aiFilled={aiFilled.has("vehicle_info")}
           manualEdit={manualEdits.has("vehicle_info")}
@@ -266,6 +271,14 @@ function Field(props: FieldProps) {
     emphasise,
   } = props;
 
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  useEffect(() => {
+    const el = textareaRef.current;
+    if (!el) return;
+    el.style.height = "0px";
+    el.style.height = el.scrollHeight + "px";
+  }, [value]);
+
   const inputCls = cn(
     "w-full rounded-md px-2.5 py-1.5 text-[13px] text-[var(--color-text)] outline-none transition-colors",
     "border",
@@ -310,10 +323,11 @@ function Field(props: FieldProps) {
       </div>
       {type === "textarea" ? (
         <textarea
+          ref={textareaRef}
           value={value}
           onChange={(e) => onChange(e.target.value)}
-          rows={2}
-          className={inputCls}
+          className={cn(inputCls, "resize-none overflow-hidden")}
+          style={{ minHeight: "3rem" }}
         />
       ) : type === "select" ? (
         <select
