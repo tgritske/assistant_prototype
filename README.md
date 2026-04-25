@@ -30,7 +30,7 @@ Install these first:
 
 Optional:
 
-- `ollama` if you want a fully local LLM backend
+- `ollama` if you want a fully local fallback LLM backend
 
 Check versions:
 
@@ -73,16 +73,13 @@ Copy the example file and edit it if needed:
 cp backend/.env.example backend/.env
 ```
 
-By default, the app can run with:
+By default, the app prefers Claude when `ANTHROPIC_API_KEY` is set.
+If Claude is not configured, it can fall back to Ollama if you install and start it.
+If neither is available, it falls back to rule-based extraction.
 
-- `OLLAMA` if you install and start it
-- rule-based fallback if no LLM API key is configured
-
-If you want a cloud LLM, put one of these keys into `backend/.env`:
+Put this into `backend/.env` to use Claude API:
 
 - `ANTHROPIC_API_KEY=...`
-- `GROQ_API_KEY=...`
-- `OPENROUTER_API_KEY=...`
 
 ### 6. Generate demo audio if needed
 
@@ -101,16 +98,14 @@ This step needs internet access because `edge-tts` uses Microsoft voices online.
 
 The backend auto-detects providers in this order:
 
-1. `ollama`
-2. `groq`
-3. `openrouter`
-4. `claude`
-5. fallback mode with no live LLM
+1. `claude`
+2. `ollama`
+3. fallback mode with no live LLM
 
 You can force one backend in `backend/.env`:
 
 ```env
-LLM_BACKEND=ollama
+LLM_BACKEND=claude
 ```
 
 ### Option A: Run fully local with Ollama
@@ -134,17 +129,12 @@ LLM_BACKEND=ollama
 OLLAMA_MODEL=qwen2.5:7b-instruct
 ```
 
-### Option B: Run with Groq / Anthropic / OpenRouter
+### Option B: Run with Claude API
 
-Put the API key in `backend/.env`, for example:
-
-```env
-GROQ_API_KEY=your_key_here
-```
-
-or:
+Put the API key in `backend/.env`:
 
 ```env
+LLM_BACKEND=claude
 ANTHROPIC_API_KEY=your_key_here
 ```
 
@@ -264,4 +254,3 @@ Frontend uses:
 - Vite
 - Tailwind CSS
 - Framer Motion
-
