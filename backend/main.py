@@ -233,10 +233,11 @@ class CallSession:
         return self._operator_interim_text or self.interim_text
 
     def _should_translate_operator_view(self) -> bool:
-        if self.language:
-            return not self.language.lower().startswith("en")
-        text = self.transcript_for_extraction
-        return any("А" <= ch <= "я" or ch in "Ёё" for ch in text)
+        if not self.language:
+            # Defer until Whisper / Claude has emitted a language; running a
+            # translation pass before then risks spurious panel mounts.
+            return False
+        return not self.language.lower().startswith("en")
 
     def _schedule_translation(self):
         if not self.started:

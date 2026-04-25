@@ -53,8 +53,6 @@ def extract_realtime_signal(
     if not text:
         return ClaudeExtraction()
 
-    language = _detect_language(text)
-    is_ru = language.startswith("ru")
     norm = text.lower()
     form = (existing_form or {}).copy()
 
@@ -64,13 +62,13 @@ def extract_realtime_signal(
     weapons = _detect_weapons(norm)
     num_victims = _extract_num_victims(text)
     age = _extract_age(text)
-    caller_name = _extract_name(text, is_ru)
+    caller_name = _extract_name(text)
     callback = _extract_phone(text)
     location = _extract_location(text)
-    condition = _detect_condition(norm, is_ru)
-    hazards = _detect_hazards(norm, is_ru)
-    vehicle_info = _extract_vehicle_info(text, norm, is_ru)
-    suspect_description = _extract_suspect_description(text, norm, is_ru)
+    condition = _detect_condition(norm)
+    hazards = _detect_hazards(norm)
+    vehicle_info = _extract_vehicle_info(text, norm)
+    suspect_description = _extract_suspect_description(text, norm)
     notes = _extract_notes(text, norm, incident_type)
 
     description = _build_description(incident_type, norm)
@@ -109,12 +107,7 @@ def extract_realtime_signal(
         suggestions=suggestions[:4],
         highlight_keywords=highlights[:10],
         priority_reasoning=priority_reasoning,
-        detected_language=language,
     )
-
-
-def _detect_language(text: str) -> str:
-    return "ru-RU" if CYRILLIC_RE.search(text) else "en-US"
 
 
 def _detect_incident_type(norm: str) -> Optional[str]:
@@ -202,8 +195,8 @@ def _extract_age(text: str) -> Optional[str]:
     return match.group(1) if match else None
 
 
-def _extract_name(text: str, is_ru: bool) -> Optional[str]:
-    match = RU_NAME_RE.search(text) if is_ru else EN_NAME_RE.search(text)
+def _extract_name(text: str) -> Optional[str]:
+    match = EN_NAME_RE.search(text)
     if not match:
         return None
     name = " ".join(part.capitalize() for part in match.group(1).split())
@@ -222,7 +215,7 @@ def _extract_location(text: str) -> Optional[str]:
     return extract_address(text)
 
 
-def _detect_condition(norm: str, is_ru: bool) -> Optional[str]:
+def _detect_condition(norm: str) -> Optional[str]:
     condition_map = [
         (["не дыш", "not breathing"], "Not breathing"),
         (["без созн", "unconscious"], "Unconscious"),
@@ -236,7 +229,7 @@ def _detect_condition(norm: str, is_ru: bool) -> Optional[str]:
     return None
 
 
-def _detect_hazards(norm: str, is_ru: bool) -> Optional[str]:
+def _detect_hazards(norm: str) -> Optional[str]:
     hazards: list[str] = []
     mapping = [
         (["нож", "пистолет", "оруж", "gun", "knife", "weapon"], "Weapon on scene"),
@@ -251,7 +244,7 @@ def _detect_hazards(norm: str, is_ru: bool) -> Optional[str]:
     return ", ".join(dict.fromkeys(hazards)) or None
 
 
-def _extract_vehicle_info(text: str, norm: str, is_ru: bool) -> Optional[str]:
+def _extract_vehicle_info(text: str, norm: str) -> Optional[str]:
     if "авар" not in norm and "машин" not in norm and "vehicle" not in norm and "car" not in norm:
         return None
     for sentence in re.split(r"[.!?]", text):
@@ -261,7 +254,7 @@ def _extract_vehicle_info(text: str, norm: str, is_ru: bool) -> Optional[str]:
     return "Vehicle incident"
 
 
-def _extract_suspect_description(text: str, norm: str, is_ru: bool) -> Optional[str]:
+def _extract_suspect_description(text: str, norm: str) -> Optional[str]:
     if "police" not in (_detect_incident_type(norm) or "") and not any(
         token in norm for token in ["нож", "пистолет", "напал", "угрож", "suspect", "attacker", "assault"]
     ):
