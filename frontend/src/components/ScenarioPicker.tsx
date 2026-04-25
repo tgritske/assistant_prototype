@@ -1,5 +1,18 @@
 import { motion } from "framer-motion";
-import { Play, Square, Mic, ChevronLeft, ChevronRight } from "lucide-react";
+import {
+  Play,
+  Square,
+  Mic,
+  ChevronLeft,
+  ChevronRight,
+  Ambulance,
+  Flame,
+  Siren,
+  Car,
+  Globe,
+  ShieldAlert,
+  type LucideIcon,
+} from "lucide-react";
 import type { ScenarioSummary } from "../types/dispatch";
 import { cn } from "../lib/utils";
 
@@ -31,12 +44,12 @@ const catLabel: Record<string, string> = {
   multilingual: "Multilingual",
 };
 
-const catEmoji: Record<string, string> = {
-  medical: "🚑",
-  fire: "🔥",
-  police: "🚔",
-  traffic: "🚗",
-  multilingual: "🌐",
+const catIcon: Record<string, LucideIcon> = {
+  medical: Ambulance,
+  fire: Flame,
+  police: Siren,
+  traffic: Car,
+  multilingual: Globe,
 };
 
 export function ScenarioPicker({
@@ -134,9 +147,10 @@ export function ScenarioPicker({
               <div className="flex items-start justify-between gap-2">
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 mb-1">
-                    <span className="text-base leading-none">
-                      {catEmoji[s.category] ?? "🚨"}
-                    </span>
+                    {(() => {
+                      const Icon = catIcon[s.category] ?? ShieldAlert;
+                      return <Icon size={14} style={{ color: border }} />;
+                    })()}
                     <span className="text-[9px] font-bold tracking-[0.12em] uppercase px-1.5 py-0.5 rounded border"
                       style={{ color: border, borderColor: border }}>
                       {catLabel[s.category] ?? s.category}

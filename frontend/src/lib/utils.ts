@@ -1,5 +1,13 @@
 import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
+import {
+  Ambulance,
+  Flame,
+  Siren,
+  Car,
+  ShieldAlert,
+  type LucideIcon,
+} from "lucide-react";
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -29,17 +37,17 @@ export function priorityTone(p: string | null | undefined) {
   }
 }
 
-export function incidentIcon(t: string | null | undefined): string {
+export function incidentIcon(t: string | null | undefined): LucideIcon {
   switch (t) {
     case "medical":
-      return "🚑";
+      return Ambulance;
     case "fire":
-      return "🔥";
+      return Flame;
     case "police":
-      return "🚔";
+      return Siren;
     case "traffic":
-      return "🚗";
+      return Car;
     default:
-      return "🚨";
+      return ShieldAlert;
   }
 }
