@@ -194,6 +194,13 @@ class CallSession:
         # Epoch incremented on every session reset; async tasks check it to
         # detect stale results and discard them instead of updating the new call.
         self._call_epoch: int = 0
+        # Cached state for the scenario final-pass / live-mic flush so that
+        # stop_call (or WS disconnect) can finalize the transcript even if the
+        # streaming loop has been cancelled mid-flight.
+        self._scenario_pcm: Optional[np.ndarray] = None
+        self._scenario_lang_hint: Optional[str] = None
+        self._scenario_total_sec: float = 0.0
+        self._scenario_full_pass_task: Optional[asyncio.Task] = None
 
     # ─── sending ──
     async def send(self, payload: dict):
@@ -649,6 +656,17 @@ class CallSession:
                 self._schedule_claude()
 
         except asyncio.CancelledError:
+            # Best-effort tail flush on raw disconnect: only if ws still alive
+            # and there's actually pending PCM. Errors here must not propagate.
+            if (
+                self._live_total_samples > 0
+                and self.ws.client_state.name == "CONNECTED"
+                and self._call_epoch == epoch
+            ):
+                try:
+                    await self._flush_pending_audio(epoch)
+                except Exception:
+                    log.exception("[%s] cancel-path flush failed", self.call_id)
             return
 
     # ─── demo playback ──
@@ -703,8 +721,29 @@ class CallSession:
         # next phrase early and produced repeated / mutated fragments.
         STEP_SEC = float(os.environ.get("SCENARIO_WHISPER_CHUNK_SEC", "4.0"))
         language_hint: Optional[str] = scen.language.split("-")[0] if scen.language else None
-        cursor_sec = 0.0
 
+        # Cache so _finalize_before_reset can run the canonical final-pass even
+        # if the streaming loop is cancelled mid-way (e.g. user clicks Stop).
+        self._scenario_pcm = pcm
+        self._scenario_lang_hint = language_hint
+        self._scenario_total_sec = total_sec
+
+        # Kick off the canonical full-audio Whisper pass IN PARALLEL with the
+        # streaming loop. By the time the user clicks End Call (or the loop
+        # finishes naturally), this task is usually already done, so the
+        # await in _run_scenario_final_pass returns immediately.
+        final_pass_enabled = os.environ.get("SCENARIO_FINAL_PASS", "1") not in ("0", "false", "False")
+        if final_pass_enabled:
+            self._scenario_full_pass_task = asyncio.create_task(
+                self.transcriber.transcribe_array(
+                    pcm, language=language_hint, use_vad=False
+                )
+            )
+
+        # Pacing gate so the verification harness can skip wall-clock waits.
+        pace_realtime = os.environ.get("SCENARIO_PACE_REALTIME", "1") not in ("0", "false", "False", "")
+
+        cursor_sec = 0.0
         while cursor_sec < total_sec:
             next_cursor = min(cursor_sec + STEP_SEC, total_sec)
             start_sample = int(cursor_sec * SAMPLE_RATE)
@@ -712,24 +751,33 @@ class CallSession:
             chunk = pcm[start_sample:end_sample]
             prompt = " ".join(self.full_transcript.split()[-30:]) or None
 
-            # Run the pacing sleep + transcription in parallel so total wall
-            # time per step == max(STEP_SEC, inference_time) instead of sum.
-            sleep_task = asyncio.create_task(asyncio.sleep(STEP_SEC))
-            transcribe_task = asyncio.create_task(
-                self.transcriber.transcribe_array(
+            if pace_realtime:
+                # Run the pacing sleep + transcription in parallel so total wall
+                # time per step == max(STEP_SEC, inference_time) instead of sum.
+                sleep_task = asyncio.create_task(asyncio.sleep(STEP_SEC))
+                transcribe_task = asyncio.create_task(
+                    self.transcriber.transcribe_array(
+                        chunk,
+                        language=language_hint,
+                        initial_prompt=prompt,
+                        use_vad=False,
+                    )
+                )
+                await sleep_task
+                segments, lang = await transcribe_task
+            else:
+                segments, lang = await self.transcriber.transcribe_array(
                     chunk,
                     language=language_hint,
                     initial_prompt=prompt,
                     use_vad=False,
                 )
-            )
-            await sleep_task
-            segments, lang = await transcribe_task
             if self._call_epoch != epoch or not self.started or self.scenario_id != scenario_id:
                 return
 
             if lang and language_hint is None:
                 language_hint = lang  # lock after first detection — faster
+                self._scenario_lang_hint = language_hint
 
             new_text = " ".join(s.text.strip() for s in segments if s.text.strip())
             if new_text.strip():
@@ -760,12 +808,181 @@ class CallSession:
 
             cursor_sec = next_cursor
 
+        # Canonical full-audio pass replaces the streamed transcript. By now the
+        # parallel task is almost certainly done so this returns instantly.
+        if final_pass_enabled:
+            try:
+                await self._run_scenario_final_pass(epoch_check=epoch)
+            except Exception:
+                log.exception("[%s] scenario final-pass failed", self.call_id)
+
         # Mop-up pass
         await asyncio.sleep(0.2)
         if self._call_epoch != epoch or not self.started or self.scenario_id != scenario_id:
             return
         self._schedule_claude(forced=True)
         await self.send({"type": "scenario_finished", "scenario_id": scenario_id})
+
+    async def _run_scenario_final_pass(self, epoch_check: Optional[int] = None) -> bool:
+        """Replace streamed transcript with one canonical full-audio pass.
+
+        Awaits the parallel task started in `play_scenario` if present; otherwise
+        runs the transcribe synchronously as a fallback. Returns True if the
+        transcript was updated, False on no-op (epoch mismatch, no PCM, etc.).
+        """
+        pcm = self._scenario_pcm
+        if pcm is None or pcm.shape[0] == 0:
+            return False
+        epoch = self._call_epoch if epoch_check is None else epoch_check
+        if self._call_epoch != epoch:
+            return False
+
+        try:
+            if self._scenario_full_pass_task is not None:
+                segments, lang = await self._scenario_full_pass_task
+            else:
+                segments, lang = await self.transcriber.transcribe_array(
+                    pcm, language=self._scenario_lang_hint, use_vad=False
+                )
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            log.exception("[%s] full-audio Whisper pass failed", self.call_id)
+            return False
+        finally:
+            self._scenario_full_pass_task = None
+
+        if self._call_epoch != epoch:
+            return False
+
+        text = " ".join(s.text.strip() for s in segments if s.text.strip()).strip()
+        if not text:
+            return False
+
+        # Replace streamed segments with one canonical span [0, total_sec].
+        canonical = TranscriptSegment(
+            text=text,
+            start=0.0,
+            end=self._scenario_total_sec or (pcm.shape[0] / SAMPLE_RATE),
+            is_final=True,
+        )
+        self.final_segments = [canonical]
+        self.provisional_segment = None
+
+        if lang and not self.language:
+            self.language = lang
+
+        await self.send(
+            {
+                "type": "transcript_update",
+                "segments": [canonical.model_dump()],
+                "full_text": self.full_transcript,
+                "interim_text": None,
+                "operator_text": self.operator_transcript,
+                "operator_interim_text": None,
+                "language": self.language,
+            }
+        )
+        self._schedule_translation()
+        self._schedule_claude(forced=True)
+        return True
+
+    async def _flush_pending_audio(self, epoch: int) -> bool:
+        """Drain queue + transcribe sub-LIVE_MIN_SEC tail. Live-mic safety net."""
+        if self._call_epoch != epoch:
+            return False
+
+        # Drain anything still in the queue into _live_pcm.
+        while not self._audio_queue.empty():
+            try:
+                pcm = self._audio_queue.get_nowait()
+            except asyncio.QueueEmpty:
+                break
+            self._live_pcm.append(pcm)
+            self._live_total_samples += pcm.shape[0]
+
+        if self._live_total_samples < int(0.2 * SAMPLE_RATE):
+            # Nothing meaningful pending.
+            self._live_pcm.clear()
+            self._live_total_samples = 0
+            return False
+
+        audio_chunk = np.concatenate(self._live_pcm)
+        self._live_pcm.clear()
+        self._live_total_samples = 0
+        self._live_transcribed_samples += audio_chunk.shape[0]
+
+        lang_hint: Optional[str] = None
+        if self.language:
+            lang_hint = self.language.split("-")[0]
+        prompt = " ".join(self.full_transcript.split()[-30:]) or None
+
+        try:
+            segments, detected_lang = await self.transcriber.transcribe_array(
+                audio_chunk,
+                language=lang_hint,
+                initial_prompt=prompt,
+                use_vad=False,
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            log.exception("[%s] live-mic flush transcription failed", self.call_id)
+            return False
+
+        if self._call_epoch != epoch:
+            return False
+
+        new_text = " ".join(s.text.strip() for s in segments if s.text.strip()).strip()
+        if not new_text:
+            return False
+
+        if detected_lang and not self.language:
+            self.language = detected_lang
+
+        t_end = self._live_transcribed_samples / SAMPLE_RATE
+        ts_seg = TranscriptSegment(
+            text=new_text,
+            start=max(0.0, t_end - audio_chunk.shape[0] / SAMPLE_RATE),
+            end=t_end,
+            is_final=True,
+        )
+        self.final_segments.append(ts_seg)
+        await self.send(
+            {
+                "type": "transcript_update",
+                "segments": [s.model_dump() for s in self.final_segments[-5:]],
+                "full_text": self.full_transcript,
+                "interim_text": None,
+                "operator_text": self.operator_transcript,
+                "operator_interim_text": None,
+                "language": self.language,
+            }
+        )
+        self._schedule_translation()
+        self._schedule_claude(forced=True)
+        return True
+
+    async def _finalize_before_reset(self):
+        """Cancel streaming task, then flush live-mic tail + scenario final pass."""
+        # Cancel the streaming loop first so it doesn't fight us for the transcriber.
+        if self._scenario_task and not self._scenario_task.done():
+            self._scenario_task.cancel()
+            try:
+                await asyncio.wait_for(asyncio.shield(self._scenario_task), timeout=0.05)
+            except (asyncio.CancelledError, asyncio.TimeoutError, Exception):
+                pass
+
+        try:
+            await self._flush_pending_audio(self._call_epoch)
+        except Exception:
+            log.exception("[%s] live-mic flush failed", self.call_id)
+
+        if self._scenario_pcm is not None:
+            try:
+                await self._run_scenario_final_pass(epoch_check=self._call_epoch)
+            except Exception:
+                log.exception("[%s] scenario final-pass failed", self.call_id)
 
     def _cancel_background_tasks(self):
         """Cancel any running Claude extraction and audio processor tasks."""
@@ -779,6 +996,9 @@ class CallSession:
         if self._scenario_task and not self._scenario_task.done():
             self._scenario_task.cancel()
         self._scenario_task = None
+        if self._scenario_full_pass_task and not self._scenario_full_pass_task.done():
+            self._scenario_full_pass_task.cancel()
+        self._scenario_full_pass_task = None
         if self._translation_task and not self._translation_task.done():
             self._translation_task.cancel()
         self._translation_task = None
@@ -809,11 +1029,18 @@ class CallSession:
         self._live_total_samples = 0
         self._live_transcribed_samples = 0
         self._lang_votes.clear()
+        self._scenario_pcm = None
+        self._scenario_lang_hint = None
+        self._scenario_total_sec = 0.0
         # Drain any leftover audio from the old call
         while not self._audio_queue.empty():
             self._audio_queue.get_nowait()
 
     async def stop(self):
+        try:
+            await self._finalize_before_reset()
+        except Exception:
+            log.exception("[%s] stop finalize failed", self.call_id)
         self._reset_call_state()
         if self.ws.client_state.name == "CONNECTED":
             await self.send({"type": "call_ended"})
@@ -977,6 +1204,10 @@ async def _handle_text(session: CallSession, raw: str):
         )
 
     elif t == "stop_call":
+        try:
+            await session._finalize_before_reset()
+        except Exception:
+            log.exception("[%s] stop_call finalize failed", session.call_id)
         session._reset_call_state()
         await session.send({"type": "call_ended"})
 

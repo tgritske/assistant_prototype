@@ -37,7 +37,16 @@ npm run build        # tsc -b && vite build
 npm run lint         # eslint .
 ```
 
-There is no Python test suite or linter wired up; backend changes are validated by running scenarios end-to-end in the UI.
+Backend has one verification harness — `backend/tests/test_tail_loss.py` — that replays demo MP3s through `CallSession` and checks the last ~4s of audio survives transcription. Run from `backend/` after activating the venv:
+
+```bash
+python tests/test_tail_loss.py                    # all scenarios, current code
+python tests/test_tail_loss.py --baseline         # demonstrate pre-fix tail loss
+python tests/test_tail_loss.py --scenario fire-structure-01
+python tests/test_tail_loss.py --mode live        # exercise live-mic path
+```
+
+The harness stubs `WebSocket` (`FakeWebSocket`), forces `WHISPER_MODEL_SIZE=base`, and sets `SCENARIO_PACE_REALTIME=0` to skip wall-clock pacing. No frontend in the loop; backend changes are otherwise validated by running scenarios end-to-end in the UI. No Python linter wired up.
 
 ## Configuration
 
@@ -83,3 +92,4 @@ Mic capture has two implementations: `useAudioCapture` (MediaRecorder/PCM upload
 - `services/form_normalizer.py` contains language-specific address regexes (English + Russian/Ukrainian patterns). Language detection is single-source-of-truth from Whisper/LLM (see recent commits). Don't reintroduce parallel detection.
 - Prompts for Claude live in `backend/prompts.py`.
 - The WS server expects PCM-16 little-endian audio at the sample rate in `audio_meta`; `whisper_service.SAMPLE_RATE` is the canonical 16 kHz.
+- Two env knobs gate the tail-flush fix verified by `test_tail_loss.py`: `SCENARIO_FINAL_PASS` (off → demo path drops the trailing chunk) and `_flush_pending_audio` on the live path. If you refactor `play_scenario` or the live-audio queue, re-run `test_tail_loss.py --baseline` vs default to confirm both paths still capture the tail.

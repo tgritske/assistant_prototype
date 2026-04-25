@@ -62,6 +62,20 @@ export function useAudioCapture(sendBinary: (data: ArrayBuffer) => boolean) {
   sendRef.current = sendBinary;
 
   const stop = useCallback(() => {
+    // Flush trailing tail BEFORE tearing the audio graph down. The RMS gate is
+    // intentionally skipped here — the last words of a call are often quiet
+    // and we'd rather send them than drop them.
+    if (
+      accRef.current.length > 0 &&
+      ctxRef.current &&
+      accLenRef.current > 0
+    ) {
+      const merged = mergeChunks(accRef.current, accLenRef.current);
+      if (merged.length >= TARGET_SR * 0.1) {
+        const downsampled = downsample(merged, ctxRef.current.sampleRate);
+        sendRef.current(toInt16(downsampled));
+      }
+    }
     processorRef.current?.disconnect();
     processorRef.current = null;
     streamRef.current?.getTracks().forEach((t) => t.stop());
