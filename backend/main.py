@@ -51,6 +51,7 @@ DEMO_DIR = BASE_DIR / "demo_audio"
 # How often to re-run the Claude extraction — one of these triggers fires it.
 WORD_COUNT_TRIGGER = 2   # new words since last extraction pass
 SILENCE_TRIGGER_SEC = 0.3  # seconds of silence since last new speech
+MIN_CLAUDE_INTERVAL_SEC = 1.5  # hard floor between consecutive Claude calls
 
 # Minimum new audio before calling Whisper for live mic. Shorter chunks feel
 # faster but often drop street names and proper nouns; 3s is the current
@@ -176,6 +177,7 @@ class CallSession:
         self.tts = get_tts_service()
         self._claude_task: Optional[asyncio.Task] = None
         self._claude_rerun_queued = False
+        self._last_claude_started_time: float = 0.0
         self._llm_ok: Optional[bool] = None  # None=unknown, True=alive, False=failing
         # Live-mic pending-audio buffer (cleared after each transcription — no overlap)
         self._live_pcm: list[np.ndarray] = []
@@ -289,7 +291,7 @@ class CallSession:
                 }
             )
             if self.operator_transcript_for_extraction.strip():
-                self._schedule_claude(forced=True)
+                self._schedule_claude()
         finally:
             if self._call_epoch == epoch and self._translation_rerun_queued:
                 self._translation_rerun_queued = False
@@ -303,6 +305,8 @@ class CallSession:
     def _should_fire_claude(self, forced: bool = False) -> bool:
         if forced:
             return True
+        if time.monotonic() - self._last_claude_started_time < MIN_CLAUDE_INTERVAL_SEC:
+            return False
         wc = self._word_count(self.transcript_for_extraction)
         if wc - self.last_claude_word_count >= WORD_COUNT_TRIGGER:
             return True
@@ -326,6 +330,7 @@ class CallSession:
 
     async def _run_claude_once(self):
         epoch = self._call_epoch  # capture on entry; changes when session resets
+        self._last_claude_started_time = time.monotonic()
         try:
             if not self.started:
                 return
@@ -337,12 +342,17 @@ class CallSession:
             )
             self.last_claude_word_count = self._word_count(transcript)
 
-            # First apply a local, deterministic extraction pass so classification
-            # and form filling stay realtime even when remote LLM latency is high.
-            heuristic = extract_realtime_signal(transcript, self.form_state)
-            await self._apply_extraction(heuristic, source_kind)
-
             translated_transcript = self.operator_transcript_for_extraction
+            lang_is_english = not self.language or self.language.lower().startswith("en")
+
+            # Run the fast heuristic on the raw transcript only when the language is
+            # English (or still unknown). The English-tuned regexes produce nothing
+            # useful on foreign text and can overwrite interim fields with blanks.
+            # For non-English, wait for the translated operator transcript instead.
+            if lang_is_english or not translated_transcript.strip():
+                heuristic = extract_realtime_signal(transcript, self.form_state)
+                await self._apply_extraction(heuristic, source_kind)
+
             if (
                 translated_transcript.strip()
                 and translated_transcript.strip() != transcript.strip()
@@ -595,13 +605,14 @@ class CallSession:
                 if self._call_epoch != epoch:
                     return  # session reset during Whisper inference → discard
 
-                # Language voting: 2 consistent detections before locking
+                # Require 2 consistent detections before locking language so a
+                # single noisy chunk can't permanently lock the wrong language.
                 if detected_lang and not self.language:
                     self._lang_votes[detected_lang] = (
                         self._lang_votes.get(detected_lang, 0) + 1
                     )
                     top = max(self._lang_votes, key=lambda k: self._lang_votes[k])
-                    if self._lang_votes[top] >= 1:
+                    if self._lang_votes[top] >= 2:
                         self.language = top
                         log.info("[%s] language locked → %s", self.call_id, top)
 
@@ -789,6 +800,7 @@ class CallSession:
         self.suggestions_seen.clear()
         self._llm_ok = None
         self.last_claude_word_count = 0
+        self._last_claude_started_time = 0.0
         self.language = None
         self.input_mode = "live_text"
         self._operator_transcript_text = ""
