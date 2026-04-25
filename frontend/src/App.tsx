@@ -146,12 +146,13 @@ export default function App() {
             suggestions={state.suggestions}
             onDismiss={dismissSuggestion}
             onDone={dismissSuggestion}
+            callerLanguage={state.callerLanguage}
+            callerLanguageName={state.callerLanguageName}
+            onSpeak={speak}
           />
           <TranslationPanel
             callerLanguage={state.callerLanguage}
             callerLanguageName={state.callerLanguageName}
-            translatedPhrases={state.translatedPhrases}
-            suggestions={state.suggestions}
             onSpeak={speak}
             lastTTSAudio={state.lastTTSAudio}
           />

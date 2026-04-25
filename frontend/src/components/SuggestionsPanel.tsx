@@ -1,5 +1,6 @@
+import { useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { AlertTriangle, ArrowRight, CheckCircle2, HelpCircle, Lightbulb, X } from "lucide-react";
+import { AlertTriangle, ArrowRight, CheckCircle2, HelpCircle, Lightbulb, PlayCircle, X } from "lucide-react";
 import type { Suggestion } from "../types/dispatch";
 import { cn } from "../lib/utils";
 
@@ -34,9 +35,22 @@ interface Props {
   suggestions: Suggestion[];
   onDismiss: (id: string) => void;
   onDone?: (id: string) => void;
+  callerLanguage?: string | null;
+  callerLanguageName?: string | null;
+  onSpeak?: (text: string, language: string, translate?: boolean) => void;
 }
 
-export function SuggestionsPanel({ suggestions, onDismiss, onDone }: Props) {
+export function SuggestionsPanel({ suggestions, onDismiss, onDone, callerLanguage, callerLanguageName, onSpeak }: Props) {
+  const [playingId, setPlayingId] = useState<string | null>(null);
+  const isNonEnglish = callerLanguage && !callerLanguage.toLowerCase().startsWith("en");
+
+  const playInCallerLanguage = (s: Suggestion) => {
+    if (!callerLanguage || !onSpeak || playingId) return;
+    onSpeak(s.question, callerLanguage, true);
+    setPlayingId(s.id);
+    setTimeout(() => setPlayingId(null), 2500);
+  };
+
   const sorted = [...suggestions].sort(
     (a, b) => (URGENCY_ORDER[a.urgency] ?? 1) - (URGENCY_ORDER[b.urgency] ?? 1)
   );
@@ -135,6 +149,22 @@ export function SuggestionsPanel({ suggestions, onDismiss, onDone }: Props) {
                         <div className="text-[11px] text-[var(--color-text-muted)] mt-1 leading-snug">
                           {s.rationale}
                         </div>
+                      )}
+
+                      {isNonEnglish && onSpeak && (
+                        <button
+                          onClick={() => playInCallerLanguage(s)}
+                          disabled={playingId !== null}
+                          className={cn(
+                            "mt-2 inline-flex items-center gap-1.5 text-[11px] font-medium rounded-md px-2 py-1 border transition-colors",
+                            playingId === s.id
+                              ? "border-blue-700/40 bg-blue-900/20 text-blue-300 opacity-70 cursor-wait"
+                              : "border-blue-700/40 bg-blue-900/20 text-blue-300 hover:bg-blue-900/40"
+                          )}
+                        >
+                          <PlayCircle size={12} />
+                          {playingId === s.id ? "Playing…" : `Play in ${callerLanguageName}`}
+                        </button>
                       )}
                     </div>
                   </div>
