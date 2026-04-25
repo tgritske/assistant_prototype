@@ -8,12 +8,13 @@ interface Props {
 }
 
 export function PriorityBadge({ priority, reasoning, compact }: Props) {
+  if (!priority) return null;
   const tone = priorityTone(priority);
   if (compact) {
     return (
       <AnimatePresence mode="popLayout">
         <motion.div
-          key={priority ?? "none"}
+          key={priority}
           initial={{ opacity: 0, y: -4, scale: 0.96 }}
           animate={{ opacity: 1, y: 0, scale: 1 }}
           exit={{ opacity: 0, y: 4, scale: 0.96 }}
@@ -29,8 +30,8 @@ export function PriorityBadge({ priority, reasoning, compact }: Props) {
             background: tone.bg,
           }}
         >
-          {priority ? <span className="w-1.5 h-1.5 rounded-full" style={{ background: tone.color }} /> : null}
-          {priority ?? "…"} · {tone.label}
+          <span className="w-1.5 h-1.5 rounded-full" style={{ background: tone.color }} />
+          {priority} · {tone.label}
         </motion.div>
       </AnimatePresence>
     );
@@ -41,7 +42,7 @@ export function PriorityBadge({ priority, reasoning, compact }: Props) {
       style={{ borderColor: tone.color, background: tone.bg }}
     >
       <div className="text-[10px] font-bold tracking-[0.14em] uppercase" style={{ color: tone.color }}>
-        Priority {priority ?? "—"}
+        Priority {priority}
       </div>
       <div className="text-sm mt-0.5 font-medium" style={{ color: tone.color }}>
         {tone.label}

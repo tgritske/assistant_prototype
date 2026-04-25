@@ -30,7 +30,10 @@ export function FormPanel({
     <section className="flex flex-col h-full bg-[var(--color-bg-panel)] min-h-0">
       <div className="flex items-center justify-between px-4 py-2.5 border-b border-[var(--color-border)]">
         <div className="flex items-center gap-2 text-[11px] font-semibold tracking-[0.14em] uppercase text-[var(--color-text-muted)]">
-          <span className="text-lg leading-none">{incidentIcon(form.incident_type)}</span>
+          {(() => {
+            const Icon = incidentIcon(form.incident_type);
+            return <Icon size={16} className="text-[var(--color-text-muted)]" />;
+          })()}
           Incident Form
         </div>
         <PriorityBadge priority={priority} reasoning={priorityReasoning} compact />
@@ -43,11 +46,11 @@ export function FormPanel({
             name="incident_type"
             type="select"
             options={[
-              { v: "medical", l: "🚑 Medical" },
-              { v: "fire", l: "🔥 Fire" },
-              { v: "police", l: "🚔 Police" },
-              { v: "traffic", l: "🚗 Traffic" },
-              { v: "other", l: "🚨 Other" },
+              { v: "medical", l: "Medical" },
+              { v: "fire", l: "Fire" },
+              { v: "police", l: "Police" },
+              { v: "traffic", l: "Traffic" },
+              { v: "other", l: "Other" },
             ]}
             value={form.incident_type ?? ""}
             aiFilled={aiFilled.has("incident_type")}
