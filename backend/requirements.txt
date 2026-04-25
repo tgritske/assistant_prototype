@@ -9,4 +9,4 @@ python-multipart==0.0.19
 numpy==1.26.4
 websockets==13.1
 python-dotenv==1.0.1
-requests==2.33.1
+requests==2.32.5
