@@ -33,7 +33,7 @@ cleanup() {
 }
 trap cleanup INT TERM
 
-(cd backend && source .venv/bin/activate && uvicorn main:app --reload --port 8000) &
+(cd backend && source .venv/bin/activate && uvicorn main:app --reload --reload-exclude '.venv/*' --port 8000) &
 (cd frontend && npm run dev) &
 
 wait
