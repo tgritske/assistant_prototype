@@ -2,6 +2,11 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Style
+
+In all interactions be extremely concise. Sacrifice grammar for the sake of concision.
+Never use unicode emojis. This is a serious emergency app.
+
 ## Project overview
 
 Real-time emergency dispatcher co-pilot. A FastAPI backend ingests audio (live mic or pre-rendered demo MP3), transcribes it with `faster-whisper` (or Reson8), runs structured extraction + suggestions through an LLM, and streams updates to a React/Vite UI over a single WebSocket. Frontend at `:5173` proxies `/ws`, `/audio`, `/scenarios`, `/tts` to the backend at `:8000` (see `frontend/vite.config.ts`).

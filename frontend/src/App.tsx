@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { X } from "lucide-react";
 import { FormPanel } from "./components/FormPanel";
 import { DispatchModal } from "./components/DispatchModal";
 import { ScenarioPicker } from "./components/ScenarioPicker";
@@ -108,7 +109,7 @@ export default function App() {
             {micError ?? state.errorMessage}
           </span>
           <button onClick={clearError} className="opacity-60 hover:opacity-100 px-2">
-            ✕
+            <X size={14} />
           </button>
         </div>
       )}
