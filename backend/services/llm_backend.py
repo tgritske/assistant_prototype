@@ -3,11 +3,9 @@
 The dispatcher's "AI" job (structured extraction, suggestions, translation)
 is delegated to whichever backend is available. Priority order:
 
-    1. Claude (Anthropic) — best quality, needs ANTHROPIC_API_KEY
-    2. Groq            — blazing fast, needs GROQ_API_KEY (free tier available)
-    3. OpenRouter      — free models (`:free` suffix), needs OPENROUTER_API_KEY
-    4. Ollama (local)  — fully offline, needs `ollama` running on :11434
-    5. None            — falls back to rule-based per-scenario fallback
+    1. Claude (Anthropic) — default, best quality, needs ANTHROPIC_API_KEY
+    2. Ollama (local)     — fully offline fallback, needs `ollama` running on :11434
+    3. None               — falls back to rule-based per-scenario fallback
 
 Each backend implements a common async interface:
     async def extract(self, transcript: str) -> Optional[ClaudeExtraction]
@@ -89,13 +87,13 @@ def build_backend() -> Optional[LLMBackend]:
     """Pick the best available backend at startup.
 
     Respects LLM_BACKEND env var for explicit override:
-        LLM_BACKEND=claude|groq|openrouter|ollama|none|auto (default)
+        LLM_BACKEND=claude|ollama|none|auto (default)
     """
     forced = (os.environ.get("LLM_BACKEND") or "auto").lower().strip()
 
     order: list[str]
     if forced == "auto":
-        order = ["ollama", "groq", "openrouter", "claude"]
+        order = ["claude", "ollama"]
     elif forced == "none":
         return None
     else:
@@ -111,8 +109,7 @@ def build_backend() -> Optional[LLMBackend]:
 
     log.warning(
         "[llm] no LLM backend available — falling back to rule-based extraction. "
-        "Set ANTHROPIC_API_KEY, GROQ_API_KEY, OPENROUTER_API_KEY, or run "
-        "`ollama serve` with a model pulled."
+        "Set ANTHROPIC_API_KEY, or run `ollama serve` with a model pulled."
     )
     return None
 
@@ -129,49 +126,6 @@ def _try_build(kind: str) -> Optional[LLMBackend]:
             return ClaudeService()
         except Exception as e:
             log.warning("[llm] claude init failed: %s", e)
-            return None
-
-    if kind == "groq":
-        key = os.environ.get("GROQ_API_KEY")
-        if not _looks_like_real_key(key, "gsk_"):
-            return None
-        try:
-            from services.openai_compat import OpenAICompatBackend
-
-            return OpenAICompatBackend(
-                name="Groq",
-                base_url="https://api.groq.com/openai/v1",
-                api_key=key,
-                model=os.environ.get(
-                    "GROQ_MODEL", "llama-3.3-70b-versatile"
-                ),
-            )
-        except Exception as e:
-            log.warning("[llm] groq init failed: %s", e)
-            return None
-
-    if kind == "openrouter":
-        key = os.environ.get("OPENROUTER_API_KEY")
-        if not _looks_like_real_key(key, "sk-or-"):
-            return None
-        try:
-            from services.openai_compat import OpenAICompatBackend
-
-            return OpenAICompatBackend(
-                name="OpenRouter",
-                base_url="https://openrouter.ai/api/v1",
-                api_key=key,
-                model=os.environ.get(
-                    "OPENROUTER_MODEL",
-                    "meta-llama/llama-3.3-70b-instruct:free",
-                ),
-                extra_headers={
-                    "HTTP-Referer": "http://localhost:5173",
-                    "X-Title": "Dispatch AI Assistant",
-                },
-            )
-        except Exception as e:
-            log.warning("[llm] openrouter init failed: %s", e)
             return None
 
     if kind == "ollama":
