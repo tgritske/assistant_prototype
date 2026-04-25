@@ -13,7 +13,7 @@ fi
 
 if [ ! -d backend/.venv ]; then
   echo "▶ Creating Python venv…"
-  (cd backend && python3 -m venv .venv && source .venv/bin/activate && pip install -r requirements.txt)
+  (cd backend && python3.11 -m venv .venv && source .venv/bin/activate && pip install -r requirements.txt)
 fi
 
 if [ -z "$(ls -A backend/demo_audio 2>/dev/null)" ]; then

@@ -29,10 +29,10 @@ export function StatusBar({
           <ShieldAlert className="text-[var(--color-critical)]" size={22} strokeWidth={2.5} />
           <div className="flex flex-col leading-tight">
             <div className="text-[15px] font-semibold tracking-wide">
-              DISPATCH AI ASSISTANT
+              E.D.A.I.A.
             </div>
-            <div className="text-[10px] uppercase tracking-[0.14em] text-[var(--color-text-dim)]">
-              assists — dispatcher makes all decisions
+            <div className="text-[10px] tracking-[0.14em] text-[var(--color-text-dim)]">
+              Emergency Dispatcher AI Assistant
             </div>
           </div>
         </div>
