@@ -8,21 +8,15 @@ from services.form_normalizer import extract_address
 
 
 PHONE_RE = re.compile(r"(?:\+?\d[\d\-\s()]{8,}\d)")
-RU_AGE_RE = re.compile(r"\b(\d{1,3})\s*(?:лет|года|год)\b", re.IGNORECASE)
 EN_AGE_RE = re.compile(r"\b(\d{1,3})\s*(?:years? old|yo)\b", re.IGNORECASE)
 COUNT_RE = re.compile(
-    r"\b(\d{1,2})\s*(?:человек|пострадавш\w+|ранен\w+|дет\w+|victims?|people|injured|children|kids)\b",
-    re.IGNORECASE,
-)
-RU_NAME_RE = re.compile(
-    r"(?:меня зовут|это)\s+([А-ЯЁ][а-яё]+(?:\s+[А-ЯЁ][а-яё]+)?)",
+    r"\b(\d{1,2})\s*(?:victims?|people|injured|children|kids)\b",
     re.IGNORECASE,
 )
 EN_NAME_RE = re.compile(
     r"(?:my name is|this is|i am)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)",
     re.IGNORECASE,
 )
-CYRILLIC_RE = re.compile(r"[А-Яа-яЁё]")
 FIRE_OCCUPANCY_RE = re.compile(
     r"\b(?:i think|maybe|possibly|probably)\s+((?:(?:mr|mrs|ms|miss)\.?\s+)?[A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)\s+(?:might|may|could|is)?\s*(?:still\s+)?(?:be\s+)?inside\b",
     re.IGNORECASE,
@@ -34,8 +28,6 @@ FIRE_NEIGHBOR_LOCATION_RE = re.compile(
 
 NUMBER_WORDS = {
     "one": 1, "two": 2, "three": 3, "four": 4, "five": 5,
-    "один": 1, "одна": 1, "два": 2, "две": 2, "три": 3,
-    "трое": 3, "троих": 3, "четыре": 4, "пять": 5,
 }
 
 
@@ -113,19 +105,15 @@ def extract_realtime_signal(
 def _detect_incident_type(norm: str) -> Optional[str]:
     categories = {
         "medical": [
-            "не дыш", "без созн", "сердц", "груд", "инсульт", "приступ", "передоз", "отрав",
             "breath", "unconscious", "chest pain", "heart", "stroke", "overdose", "seizure",
         ],
         "fire": [
-            "пожар", "горит", "дым", "огонь", "газ", "запах газа", "угар",
             "fire", "smoke", "flames", "gas leak", "carbon monoxide",
         ],
         "police": [
-            "нож", "пистолет", "оруж", "драк", "бьет", "угрож", "напал", "влом",
             "knife", "gun", "weapon", "assault", "fight", "threat", "break in", "robbery",
         ],
         "traffic": [
-            "авар", "дтп", "машин", "столкнов", "сбил", "дорог",
             "crash", "accident", "car", "vehicle", "collision", "hit by",
         ],
     }
@@ -141,14 +129,13 @@ def _detect_incident_type(norm: str) -> Optional[str]:
 
 def _detect_priority(norm: str, incident_type: Optional[str]) -> Optional[str]:
     p1 = [
-        "не дыш", "без созн", "останов", "сильное кровотеч", "горит", "пожар", "газ", "нож", "пистолет",
         "not breathing", "unconscious", "cardiac arrest", "severe bleeding", "fire", "gun", "knife",
     ]
     p2 = [
-        "боль в груди", "тяжело дыш", "избил", "драка", "overdose", "chest pain", "domestic", "crash",
+        "overdose", "chest pain", "domestic", "crash",
     ]
     p3 = [
-        "minor", "property damage", "легк", "стабиль", "царап",
+        "minor", "property damage",
     ]
     if any(token in norm for token in p1):
         return "P1"
@@ -162,15 +149,15 @@ def _detect_priority(norm: str, incident_type: Optional[str]) -> Optional[str]:
 
 
 def _detect_injuries(norm: str) -> Optional[str]:
-    if any(token in norm for token in ["кров", "ранен", "hurt", "injur", "bleed", "слом", "burn"]):
+    if any(token in norm for token in ["hurt", "injur", "bleed", "burn"]):
         return "yes"
-    if any(token in norm for token in ["не ранен", "без травм", "no injuries", "not hurt"]):
+    if any(token in norm for token in ["no injuries", "not hurt"]):
         return "no"
     return "unknown"
 
 
 def _detect_weapons(norm: str) -> Optional[str]:
-    if any(token in norm for token in ["нож", "пистолет", "оруж", "gun", "knife", "weapon"]):
+    if any(token in norm for token in ["gun", "knife", "weapon"]):
         return "yes"
     return "unknown"
 
@@ -185,13 +172,13 @@ def _extract_num_victims(text: str) -> Optional[int]:
 
     lowered = text.lower()
     for word, value in NUMBER_WORDS.items():
-        if re.search(rf"\b{re.escape(word)}\b\s+(?:children|kids|people|victims|дет\w+|человек)", lowered):
+        if re.search(rf"\b{re.escape(word)}\b\s+(?:children|kids|people|victims)", lowered):
             return value
     return None
 
 
 def _extract_age(text: str) -> Optional[str]:
-    match = RU_AGE_RE.search(text) or EN_AGE_RE.search(text)
+    match = EN_AGE_RE.search(text)
     return match.group(1) if match else None
 
 
@@ -217,11 +204,11 @@ def _extract_location(text: str) -> Optional[str]:
 
 def _detect_condition(norm: str) -> Optional[str]:
     condition_map = [
-        (["не дыш", "not breathing"], "Not breathing"),
-        (["без созн", "unconscious"], "Unconscious"),
-        (["тяжело дыш", "barely breathing", "trouble breathing"], "Trouble breathing"),
-        (["сильное кровотеч", "bleeding heavily"], "Severe bleeding"),
-        (["боль в груди", "chest pain"], "Chest pain"),
+        (["not breathing"], "Not breathing"),
+        (["unconscious"], "Unconscious"),
+        (["barely breathing", "trouble breathing"], "Trouble breathing"),
+        (["bleeding heavily"], "Severe bleeding"),
+        (["chest pain"], "Chest pain"),
     ]
     for needles, label in condition_map:
         if any(needle in norm for needle in needles):
@@ -232,11 +219,11 @@ def _detect_condition(norm: str) -> Optional[str]:
 def _detect_hazards(norm: str) -> Optional[str]:
     hazards: list[str] = []
     mapping = [
-        (["нож", "пистолет", "оруж", "gun", "knife", "weapon"], "Weapon on scene"),
-        (["пожар", "огонь", "дым", "fire", "smoke"], "Fire / smoke"),
-        (["газ", "gas leak"], "Gas leak"),
-        (["машин", "vehicle", "car", "fuel"], "Vehicle / possible fuel hazard"),
-        (["дет", "children", "kids", "крик", "cries", "crying"], "Possible occupants inside"),
+        (["gun", "knife", "weapon"], "Weapon on scene"),
+        (["fire", "smoke"], "Fire / smoke"),
+        (["gas leak"], "Gas leak"),
+        (["vehicle", "car", "fuel"], "Vehicle / possible fuel hazard"),
+        (["children", "kids", "cries", "crying"], "Possible occupants inside"),
     ]
     for needles, label in mapping:
         if any(needle in norm for needle in needles):
@@ -245,23 +232,23 @@ def _detect_hazards(norm: str) -> Optional[str]:
 
 
 def _extract_vehicle_info(text: str, norm: str) -> Optional[str]:
-    if "авар" not in norm and "машин" not in norm and "vehicle" not in norm and "car" not in norm:
+    if "vehicle" not in norm and "car" not in norm:
         return None
     for sentence in re.split(r"[.!?]", text):
         lower = sentence.lower()
-        if any(token in lower for token in ["машин", "авто", "car", "vehicle", "truck", "bus"]):
+        if any(token in lower for token in ["car", "vehicle", "truck", "bus"]):
             return sentence.strip()[:120] or "Vehicle incident"
     return "Vehicle incident"
 
 
 def _extract_suspect_description(text: str, norm: str) -> Optional[str]:
     if "police" not in (_detect_incident_type(norm) or "") and not any(
-        token in norm for token in ["нож", "пистолет", "напал", "угрож", "suspect", "attacker", "assault"]
+        token in norm for token in ["suspect", "attacker", "assault"]
     ):
         return None
     for sentence in re.split(r"[.!?]", text):
         lower = sentence.lower()
-        if any(token in lower for token in ["мужчин", "женщин", "suspect", "man", "woman", "red", "black", "shirt"]):
+        if any(token in lower for token in ["suspect", "man", "woman", "red", "black", "shirt"]):
             return sentence.strip()[:160]
     return "Suspect on scene"
 
@@ -276,13 +263,13 @@ def _build_description(incident_type: Optional[str], norm: str) -> Optional[str]
     }
     desc = descriptions.get(incident_type or "other")
     if incident_type == "medical":
-        if "не дыш" in norm or "not breathing" in norm:
+        if "not breathing" in norm:
             return "Patient not breathing"
-        if "боль в груди" in norm or "chest pain" in norm:
+        if "chest pain" in norm:
             return "Chest pain, urgent medical response"
-    if incident_type == "fire" and ("газ" in norm or "gas" in norm):
+    if incident_type == "fire" and "gas" in norm:
         return "Gas leak / ignition risk"
-    if incident_type == "fire" and any(token in norm for token in ["дет", "children", "kids", "крик", "cries"]):
+    if incident_type == "fire" and any(token in norm for token in ["children", "kids", "cries"]):
         return "Fire with possible occupants inside"
     return desc
 
@@ -294,20 +281,20 @@ def _extract_notes(text: str, norm: str, incident_type: Optional[str]) -> Option
         floor_match = re.search(r"\b(\d+)(?:st|nd|rd|th)\s+floor\b", text, re.IGNORECASE)
         if floor_match:
             notes.append(f"Reported on floor {floor_match.group(1)}")
-        elif any(token in norm for token in ["third floor", "трет", "3 этаж"]):
+        elif "third floor" in norm:
             notes.append("Reported on third floor")
 
-        if any(token in norm for token in ["children", "kids", "дет"]):
+        if any(token in norm for token in ["children", "kids"]):
             notes.append("Children may be inside")
-        if any(token in norm for token in ["cries", "crying", "крик"]):
+        if any(token in norm for token in ["cries", "crying"]):
             notes.append("Caller heard cries from inside")
-        if any(token in norm for token in ["orange flames", "оранжев"]):
+        if "orange flames" in norm:
             notes.append("Orange flames visible")
-        if any(token in norm for token in ["black smoke", "thick smoke", "чёрные клубы дыма", "черные клубы дыма"]):
+        if any(token in norm for token in ["black smoke", "thick smoke"]):
             notes.append("Heavy smoke visible")
-        if any(token in norm for token in ["upstairs windows", "upper windows", "окна", "верхние окна"]):
+        if any(token in norm for token in ["upstairs windows", "upper windows"]):
             notes.append("Flames visible from upper windows")
-        if any(token in norm for token in ["cracking", "roof", "крыш"]):
+        if any(token in norm for token in ["cracking", "roof"]):
             notes.append("Possible roof involvement")
         occupant = _extract_possible_fire_occupant(text, norm)
         if occupant:
@@ -329,7 +316,7 @@ def _extract_possible_fire_occupant(text: str, norm: str) -> Optional[str]:
         ]
         name = " ".join(part[:1].upper() + part[1:] for part in name_parts)
         return f"Possible occupant inside: {name.strip()}"
-    if any(token in norm for token in ["someone inside", "person inside", "кто-то внутри"]):
+    if any(token in norm for token in ["someone inside", "person inside"]):
         return "Possible occupant inside"
     return None
 
@@ -402,7 +389,7 @@ def _build_suggestions(
         )
 
     if incident_type == "medical":
-        if any(token in norm for token in ["не дыш", "not breathing", "без созн", "unconscious"]):
+        if any(token in norm for token in ["not breathing", "unconscious"]):
             add(
                 "medical_cpr",
                 "critical_medical",
@@ -497,7 +484,6 @@ def _build_suggestions(
 def _build_highlights(text: str, norm: str, incident_type: Optional[str]) -> list[str]:
     highlights: list[str] = []
     phrases = [
-        "не дышит", "без сознания", "боль в груди", "кровотечение", "пожар", "дым", "газ", "нож", "пистолет", "авария",
         "not breathing", "unconscious", "chest pain", "bleeding", "fire", "smoke", "gas leak", "knife", "gun", "accident",
     ]
     for phrase in phrases:
