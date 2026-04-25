@@ -10,7 +10,14 @@ end-to-end run, not a scripted fake.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+
+
+@dataclass
+class DialogTurn:
+    speaker: str  # "caller" | "dispatcher"
+    text: str
+    piper_model: str = ""  # overrides scenario-level model when set
 
 
 @dataclass
@@ -21,12 +28,18 @@ class Scenario:
     category: str  # "medical", "fire", "police", "traffic", "multilingual"
     language: str  # BCP-47
     voice: str  # edge-tts voice id
-    script: str  # full monologue with natural pauses (comma, period, ellipsis)
+    script: str = ""  # caller-only monologue for edge-tts playback; empty when dialog is used
     difficulty: str = "medium"  # "easy", "medium", "hard"
     # Speech delivery — tuned per scenario. Faster + higher pitch = distress.
     rate: str = "+30%"
     pitch: str = "+4Hz"
     volume: str = "+0%"
+    # Dialog mode — alternating caller/dispatcher turns
+    dialog: list[DialogTurn] = field(default_factory=list)
+    dispatcher_voice: str = "en-US-GuyNeural"  # edge-tts voice for dispatcher turns
+    # piper model names (used when piper is available instead of edge-tts)
+    caller_piper_model: str = "en_US-amy-medium"
+    dispatcher_piper_model: str = "en_US-lessac-medium"
 
 
 SCENARIOS: list[Scenario] = [
@@ -150,6 +163,45 @@ SCENARIOS: list[Scenario] = [
             "There's a bottle on the floor but I can't read it, I don't know what he took! "
             "My name is Jordan. Please, tell me what to do!"
         ),
+    ),
+    Scenario(
+        id="gas-leak-dialog-01",
+        title="Gas leak — roommate trapped inside",
+        description=(
+            "Full dispatcher/caller dialog. Caller outside, smells gas, roommate unresponsive inside. "
+            "Dispatcher guides caller to safety and relays info to fire crews."
+        ),
+        category="fire",
+        language="en-US",
+        voice="en-US-EmmaNeural",  # edge-tts fallback (caller voice)
+        difficulty="hard",
+        rate="+35%",
+        pitch="+8Hz",
+        caller_piper_model="en_US-amy-medium",
+        dispatcher_piper_model="en_US-lessac-medium",
+        dialog=[
+            DialogTurn("dispatcher", "Nine-one-one, what is your emergency?"),
+            DialogTurn("caller", "Please help! There's a strong gas smell coming from my apartment and my roommate is still inside, he won't answer!"),
+            DialogTurn("dispatcher", "Are you outside the building right now?"),
+            DialogTurn("caller", "Yes, yes I just ran out. But Jamie is still in there, his bedroom door is closed, he might be asleep!"),
+            DialogTurn("dispatcher", "Do not go back inside. I'm sending fire and EMS right now. What is the address?"),
+            DialogTurn("caller", "It's forty-four Birchwood Drive, apartment two-oh-four. Oh god, what if he can't breathe in there?"),
+            DialogTurn("dispatcher", "Units are on the way. What's your name?"),
+            DialogTurn("caller", "Emma. Emma Reyes. Please hurry, the smell was really strong near the kitchen."),
+            DialogTurn("dispatcher", "Emma, you did the right thing getting out. Is anyone else in the building you know of?"),
+            DialogTurn("caller", "I don't know — there's Mrs. Kim across the hall, she's older. Should I knock on doors?"),
+            DialogTurn("dispatcher", "Do not go back inside. Move to the street, away from the building entrance. Do not use any elevators or light switches. Can you see others leaving?"),
+            DialogTurn("caller", "A couple people are coming out now. I can hear a hissing sound from the kitchen window up there."),
+            DialogTurn("dispatcher", "Stay back at least one hundred feet from the building. What floor is your apartment?"),
+            DialogTurn("caller", "Second floor. The window above the entrance — that's our kitchen. Is it going to explode?"),
+            DialogTurn("dispatcher", "Fire crews are very close. Keep calling Jamie's phone — vibration may wake him. What does he look like?"),
+            DialogTurn("caller", "He's tall, twenty-three, dark hair, usually wears a gray hoodie to sleep. Jamie! Pick up!"),
+            DialogTurn("dispatcher", "I've relayed that description. Do you see emergency vehicles?"),
+            DialogTurn("caller", "Yes! Yes, a fire truck is turning onto the street right now. Oh thank god."),
+            DialogTurn("dispatcher", "Flag them down and tell them: second floor, apartment two-oh-four, possible person inside, hissing near the kitchen window."),
+            DialogTurn("caller", "Okay, I'm going to them now. Please make sure they find him!"),
+            DialogTurn("dispatcher", "They will. Stay with the crews and keep your phone on. I'm here."),
+        ],
     ),
 ]
 
