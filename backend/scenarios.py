@@ -203,6 +203,34 @@ SCENARIOS: list[Scenario] = [
             DialogTurn("dispatcher", "They will. Stay with the crews and keep your phone on. I'm here."),
         ],
     ),
+    Scenario(
+        id="fire-kitchen-dialog-01",
+        title="Kitchen fire — occupant outside, spreading fast",
+        description=(
+            "Very short dialog. Caller escaped kitchen fire, husband still inside. "
+            "Short clipped sentences, high urgency."
+        ),
+        category="fire",
+        language="en-US",
+        voice="en-US-JennyNeural",
+        difficulty="medium",
+        rate="+50%",
+        pitch="+10Hz",
+        caller_piper_model="en_US-amy-medium",
+        dispatcher_piper_model="en_US-lessac-medium",
+        dialog=[
+            DialogTurn("dispatcher", "One-one-two, what's your emergency?"),
+            DialogTurn("caller", "My kitchen is on fire! I got out. My husband is still inside!"),
+            DialogTurn("dispatcher", "What's the address?"),
+            DialogTurn("caller", "Sixty-two Halston Ave. Single story, brown roof. His name is Ray, he's sixty-five."),
+            DialogTurn("dispatcher", "Firefighters are on the way. Is he mobile?"),
+            DialogTurn("caller", "He uses a walker. He was in the back bedroom when I ran out!"),
+            DialogTurn("dispatcher", "Stay back. Don't go in. Which side is the bedroom?"),
+            DialogTurn("caller", "Left side of the house. Window faces the yard. Hurry, the smoke is everywhere!"),
+            DialogTurn("dispatcher", "Crew is one minute out. Wave them to the left side."),
+            DialogTurn("caller", "I see lights. I'm waving. Please get him out!"),
+        ],
+    ),
 ]
 
 

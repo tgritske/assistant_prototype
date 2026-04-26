@@ -40,6 +40,7 @@ DEFAULT_VOICES: dict[str, str] = {
 
 COMMON_DISPATCHER_PHRASES: list[str] = [
     "911, what is your emergency?",
+    "112, what is your emergency?",
     "Stay on the line, help is on the way.",
     "What is your address?",
     "Is anyone hurt?",
