@@ -284,10 +284,17 @@ class CallSession:
 
     @property
     def worker_final_text(self) -> str:
+        # tts_request turns are excluded: they are dispatcher phrases the
+        # backend played to the caller, not what the dispatcher actually said
+        # into the mic. Including them in Whisper's initial_prompt makes
+        # Whisper hallucinate the played phrase back on the next chunk.
         return " ".join(
             t.text.strip()
             for t in self.dialogue_turns
-            if t.speaker == "worker" and t.is_final and t.text.strip()
+            if t.speaker == "worker"
+            and t.is_final
+            and t.source != "tts_request"
+            and t.text.strip()
         )
 
     @property
@@ -716,7 +723,13 @@ class CallSession:
         epoch = self._call_epoch
         # Minimum NEW audio before we bother calling Whisper.
         CHUNK_MIN = int(LIVE_MIN_SEC * SAMPLE_RATE)
+        # If a partial buffer has been sitting under CHUNK_MIN for this long
+        # with no new audio, the mic has likely been toggled off. Drop it so
+        # it doesn't concatenate with audio from a future mic session and
+        # produce stitched/garbled transcriptions on resume.
+        STALE_BUFFER_SEC = 2.0
         is_caller = speaker == "caller"
+        last_chunk_time = time.monotonic()
 
         try:
             while True:
@@ -725,12 +738,16 @@ class CallSession:
                 except asyncio.TimeoutError:
                     if self._call_epoch != epoch:
                         return
+                    if state.pcm and time.monotonic() - last_chunk_time > STALE_BUFFER_SEC:
+                        state.pcm.clear()
+                        state.total_samples = 0
                     continue
 
                 if self._call_epoch != epoch:
                     return
 
-                self.last_audio_time = time.monotonic()
+                last_chunk_time = time.monotonic()
+                self.last_audio_time = last_chunk_time
 
                 new_chunks = [pcm]
                 while not state.queue.empty():

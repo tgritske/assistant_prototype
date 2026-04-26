@@ -188,7 +188,7 @@ export function ScenarioPicker({
         <div className="p-3 border-t border-[var(--color-border)]">
           <button
             onClick={onLiveMic}
-            disabled={inCall}
+            disabled={Boolean(activeId) && !micActive}
             className={cn(
               "w-full rounded-md py-2 text-[12px] font-semibold tracking-[0.1em] uppercase border inline-flex items-center justify-center gap-2 disabled:opacity-40 transition-colors",
               micActive

@@ -74,20 +74,43 @@ export default function App() {
     send({ type: "stop_call" });
   }, [send, stopMic, stopWorkerMic]);
 
-  const startLiveMic = useCallback(async () => {
-    send({ type: "start_call", input_mode: "live_audio" });
+  // Caller and worker mics are mutually exclusive: starting one stops the
+  // other so a single recognized stream is never split across speakers.
+  const toggleCallerMic = useCallback(async () => {
+    if (isRecording) {
+      stopMic();
+      return;
+    }
+    if (workerRecording) stopWorkerMic();
+    if (!state.inCall) send({ type: "start_call", input_mode: "live_audio" });
     await startMic();
-  }, [send, startMic]);
+  }, [
+    isRecording,
+    workerRecording,
+    stopMic,
+    stopWorkerMic,
+    startMic,
+    state.inCall,
+    send,
+  ]);
 
   const toggleWorkerMic = useCallback(async () => {
     if (workerRecording) {
       stopWorkerMic();
-    } else {
-      // Worker mic also requires an active call so backend has a session.
-      if (!state.inCall) send({ type: "start_call", input_mode: "live_audio" });
-      await startWorkerMic();
+      return;
     }
-  }, [workerRecording, stopWorkerMic, startWorkerMic, state.inCall, send]);
+    if (isRecording) stopMic();
+    if (!state.inCall) send({ type: "start_call", input_mode: "live_audio" });
+    await startWorkerMic();
+  }, [
+    workerRecording,
+    isRecording,
+    stopWorkerMic,
+    stopMic,
+    startWorkerMic,
+    state.inCall,
+    send,
+  ]);
 
   const sendManualEdit = useCallback(
     (field: keyof FormFields, value: unknown) => {
@@ -149,7 +172,7 @@ export default function App() {
           activeId={state.scenarioId}
           onPlay={playScenario}
           onStop={stopCall}
-          onLiveMic={startLiveMic}
+          onLiveMic={toggleCallerMic}
           micActive={isRecording}
           collapsed={!sidebarOpen}
           onToggleCollapse={() => setSidebarOpen((v) => !v)}
