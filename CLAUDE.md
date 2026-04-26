@@ -62,7 +62,7 @@ The harness stubs `WebSocket` (`FakeWebSocket`), forces `WHISPER_MODEL_SIZE=base
 
 ### Single WebSocket, single session per connection
 
-`backend/main.py` is the entry point. Everything realtime flows through one `WS /ws`. The `CallSession` class (`main.py:147`) owns all per-call state: transcript segments, form state, AI-filled vs. dispatcher-edited fields, pending audio buffer, language votes, and async tasks for extraction and translation.
+`backend/main.py` is the entry point. Everything realtime flows through one `WS /ws`. The `CallSession` class (`main.py:170`) owns all per-call state: transcript segments, form state, AI-filled vs. dispatcher-edited fields, pending audio buffer, language votes, and async tasks for extraction and translation.
 
 Key mechanisms inside `CallSession`:
 

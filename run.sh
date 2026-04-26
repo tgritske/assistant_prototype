@@ -34,6 +34,11 @@ cleanup() {
 trap cleanup INT TERM
 
 (cd backend && source .venv/bin/activate && uvicorn main:app --reload --reload-exclude '.venv/*' --port 8000) &
+
+echo "▶ Waiting for backend on :8000…"
+until nc -z 127.0.0.1 8000 2>/dev/null; do sleep 0.5; done
+echo "▶ Backend up."
+
 (cd frontend && npm run dev) &
 
 wait
