@@ -48,7 +48,7 @@ export function StatusBar({
           <Radio size={13} />
           {inCall ? `LIVE · ${fmtElapsed(elapsed)}` : "STANDBY"}
         </Pill>
-        <Pill tone="info" title="Audio never leaves this machine. Whisper runs locally; only structured text reaches the LLM.">
+        {/* <Pill tone="info" title="Audio never leaves this machine. Whisper runs locally; only structured text reaches the LLM.">
           <Lock size={13} />
           AUDIO LOCAL
         </Pill>
@@ -64,7 +64,7 @@ export function StatusBar({
             <Cpu size={13} />
             {llmMode === "live" ? (llmBackend ?? "LLM") : "LOCAL RULES"}
           </Pill>
-        )}
+        )} */}
         {callId && (
           <div className="text-[10px] font-mono text-[var(--color-text-dim)]">#{callId}</div>
         )}
