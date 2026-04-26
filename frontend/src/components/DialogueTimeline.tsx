@@ -86,7 +86,7 @@ function TurnRow({ turn, highlights }: { turn: DialogueTurn; highlights: string[
           turn.is_final ? "" : "italic opacity-80"
         }`}
       >
-        {highlightText(turn.text, highlights)}
+        {highlightText(turn.text_en ?? turn.text, highlights)}
       </div>
     </div>
   );

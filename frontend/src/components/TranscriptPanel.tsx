@@ -1,12 +1,9 @@
 import { useEffect, useMemo, useRef } from "react";
-import { motion } from "framer-motion";
 import { Headphones, Languages, Mic, MicOff } from "lucide-react";
 import type { DialogueTurn } from "../types/dispatch";
 import { DialogueTimeline } from "./DialogueTimeline";
 
 interface Props {
-  transcript: string;
-  interimText: string;
   originalTranscript: string;
   originalInterimText: string;
   highlights: string[];
@@ -16,14 +13,13 @@ interface Props {
   playbackAudioUrl: string | null;
   dialogueTurns: DialogueTurn[];
   callerInterimText: string;
+  callerInterimTextEn: string;
   workerInterimText: string;
   workerMicActive: boolean;
   onToggleWorkerMic: () => void;
 }
 
 export function TranscriptPanel({
-  transcript,
-  interimText,
   originalTranscript,
   originalInterimText,
   highlights,
@@ -33,6 +29,7 @@ export function TranscriptPanel({
   playbackAudioUrl,
   dialogueTurns,
   callerInterimText,
+  callerInterimTextEn,
   workerInterimText,
   workerMicActive,
   onToggleWorkerMic,
@@ -45,7 +42,7 @@ export function TranscriptPanel({
     const el = scrollRef.current;
     if (!el) return;
     el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
-  }, [transcript, interimText]);
+  }, [dialogueTurns, originalTranscript, originalInterimText]);
 
   useEffect(() => {
     if (playbackAudioUrl && audioRef.current) {
@@ -54,14 +51,6 @@ export function TranscriptPanel({
     }
   }, [playbackAudioUrl]);
 
-  const highlighted = useMemo(
-    () => highlightTranscript(transcript, highlights),
-    [transcript, highlights]
-  );
-  const highlightedInterim = useMemo(
-    () => highlightTranscript(interimText, highlights),
-    [interimText, highlights]
-  );
   const originalHighlighted = useMemo(
     () => highlightTranscript(originalTranscript, highlights),
     [originalTranscript, highlights]
@@ -72,6 +61,13 @@ export function TranscriptPanel({
   );
 
   const nonEnglish = callerLanguage && !callerLanguage.toLowerCase().startsWith("en");
+
+  // For non-English calls, show the translated caller interim in the dialogue
+  // bubble; the raw caller-language text still appears in "Original Caller
+  // Wording" below. Falls back to raw if translation hasn't landed yet.
+  const callerInterimDisplay = nonEnglish
+    ? callerInterimTextEn || callerInterimText
+    : callerInterimText;
 
   return (
     <section className="flex flex-col h-full bg-[var(--color-bg-panel)] border-r border-[var(--color-border)] min-h-0">
@@ -114,7 +110,7 @@ export function TranscriptPanel({
         ref={scrollRef}
         className="flex-1 overflow-y-auto px-5 py-4 text-[15px] leading-relaxed"
       >
-        {!transcript && !interimText && !originalTranscript && !originalInterimText && !hasDialogue ? (
+        {!originalTranscript && !originalInterimText && !hasDialogue ? (
           <div className="h-full flex items-center justify-center text-center">
             <div className="text-[var(--color-text-dim)]">
               <div className="text-sm mb-1">
@@ -132,29 +128,11 @@ export function TranscriptPanel({
             {hasDialogue && (
               <DialogueTimeline
                 turns={dialogueTurns}
-                callerInterim={callerInterimText}
+                callerInterim={callerInterimDisplay}
                 workerInterim={workerInterimText}
                 highlights={highlights}
               />
             )}
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              className="rounded-xl border border-[var(--color-ai-border)] bg-[var(--color-ai-bg)] px-4 py-3"
-            >
-              <div className="text-[10px] uppercase tracking-[0.12em] text-blue-300 font-semibold mb-2">
-                English For Dispatcher
-              </div>
-              <div className="whitespace-pre-wrap text-[var(--color-text)]">
-                {highlighted}
-                {interimText && (
-                  <span className="text-blue-200/80 italic">
-                    {transcript ? " " : ""}
-                    {highlightedInterim}
-                  </span>
-                )}
-              </div>
-            </motion.div>
 
             {nonEnglish && (
               <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-bg-elevated)] px-4 py-3">

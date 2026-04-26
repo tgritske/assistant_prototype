@@ -23,6 +23,7 @@ export interface CallState {
   dialogueTurns: DialogueTurn[];
   callerText: string;
   callerInterimText: string;
+  callerInterimTextEn: string;
   workerText: string;
   workerInterimText: string;
   form: FormFields;
@@ -60,6 +61,7 @@ export const INITIAL_STATE: CallState = {
   dialogueTurns: [],
   callerText: "",
   callerInterimText: "",
+  callerInterimTextEn: "",
   workerText: "",
   workerInterimText: "",
   form: {},
@@ -185,6 +187,7 @@ function reducer(state: CallState, action: Action): CallState {
             dialogueTurns: m.turns,
             callerText: m.caller_text,
             callerInterimText: m.caller_interim_text ?? "",
+            callerInterimTextEn: m.caller_interim_text_en ?? "",
             workerText: m.worker_text,
             workerInterimText: m.worker_interim_text ?? "",
           };

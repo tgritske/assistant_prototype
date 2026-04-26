@@ -68,6 +68,7 @@ class DialogueTurn(BaseModel):
     channel: str
     source: DialogueSource = "whisper"
     text: str
+    text_en: Optional[str] = None
     start: float
     end: float
     is_final: bool = True
@@ -190,6 +191,7 @@ class ServerDialogueUpdate(BaseModel):
     turns: list[DialogueTurn]
     caller_text: str
     caller_interim_text: Optional[str] = None
+    caller_interim_text_en: Optional[str] = None
     worker_text: str
     worker_interim_text: Optional[str] = None
     full_text: str

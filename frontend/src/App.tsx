@@ -156,8 +156,6 @@ export default function App() {
         />
 
         <TranscriptPanel
-          transcript={state.operatorTranscript}
-          interimText={state.operatorTranscriptInterim}
           originalTranscript={state.transcript}
           originalInterimText={state.transcriptInterim}
           highlights={state.highlights}
@@ -167,6 +165,7 @@ export default function App() {
           playbackAudioUrl={state.playbackAudioUrl}
           dialogueTurns={state.dialogueTurns}
           callerInterimText={state.callerInterimText}
+          callerInterimTextEn={state.callerInterimTextEn}
           workerInterimText={state.workerInterimText}
           workerMicActive={workerRecording}
           onToggleWorkerMic={toggleWorkerMic}

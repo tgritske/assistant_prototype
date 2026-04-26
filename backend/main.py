@@ -221,6 +221,11 @@ class CallSession:
         self._translation_rerun_queued = False
         self._operator_transcript_text: str = ""
         self._operator_interim_text: str = ""
+        # Cached English translations for individual caller dialogue turns,
+        # keyed by turn id. Worker turns are typed in English so we don't
+        # translate them — the frontend falls back to turn.text.
+        self._turn_translations: dict[str, str] = {}
+        self._caller_interim_text_en: str = ""
         # Epoch incremented on every session reset; async tasks check it to
         # detect stale results and discard them instead of updating the new call.
         self._call_epoch: int = 0
@@ -297,12 +302,21 @@ class CallSession:
 
     async def _send_dialogue_update(self):
         """Broadcast the speaker-labeled dialogue snapshot to the client."""
+        turns_payload: list[dict] = []
+        for t in self.dialogue_turns[-20:]:
+            d = t.model_dump()
+            if t.speaker == "caller" and t.is_final:
+                cached = self._turn_translations.get(t.id)
+                if cached:
+                    d["text_en"] = cached
+            turns_payload.append(d)
         await self.send(
             {
                 "type": "dialogue_update",
-                "turns": [t.model_dump() for t in self.dialogue_turns[-20:]],
+                "turns": turns_payload,
                 "caller_text": self.caller_final_text,
                 "caller_interim_text": self.caller_interim_text or None,
+                "caller_interim_text_en": self._caller_interim_text_en or None,
                 "worker_text": self.worker_final_text,
                 "worker_interim_text": self.worker_interim_text or None,
                 "full_text": self.full_transcript,
@@ -368,6 +382,50 @@ class CallSession:
                 return
             self._operator_transcript_text = translated_full
             self._operator_interim_text = translated_interim
+
+            # Translate any final caller turns we haven't translated yet, and
+            # the latest caller interim text. Worker turns are dispatcher
+            # speech (already English) so we skip them.
+            untranslated = [
+                t for t in self.dialogue_turns
+                if t.speaker == "caller" and t.is_final
+                and t.id not in self._turn_translations
+                and t.text.strip()
+            ]
+            dialogue_changed = False
+            if untranslated:
+                try:
+                    translated_turns = await self.llm.translate_phrases(
+                        "English", [t.text for t in untranslated]
+                    )
+                except Exception as e:
+                    log.warning("dialogue turn translation failed: %s", e)
+                    translated_turns = []
+                if self._call_epoch != epoch or not self.started:
+                    return
+                for t, tr in zip(untranslated, translated_turns):
+                    if tr and tr.strip():
+                        self._turn_translations[t.id] = tr
+                        dialogue_changed = True
+
+            caller_interim_raw = self.caller_interim_text
+            if caller_interim_raw:
+                try:
+                    new_interim_en = await self.llm.translate_text(
+                        "English", caller_interim_raw, source_language=source_language
+                    )
+                except Exception as e:
+                    log.warning("caller interim translation failed: %s", e)
+                    new_interim_en = ""
+                if self._call_epoch != epoch or not self.started:
+                    return
+                if new_interim_en and new_interim_en != self._caller_interim_text_en:
+                    self._caller_interim_text_en = new_interim_en
+                    dialogue_changed = True
+            elif self._caller_interim_text_en:
+                self._caller_interim_text_en = ""
+                dialogue_changed = True
+
             await self.send(
                 {
                     "type": "transcript_update",
@@ -379,6 +437,8 @@ class CallSession:
                     "language": self.language,
                 }
             )
+            if dialogue_changed:
+                await self._send_dialogue_update()
             if self.operator_transcript_for_extraction.strip():
                 self._schedule_claude()
         finally:
@@ -1352,6 +1412,8 @@ class CallSession:
         self.input_mode = "live_text"
         self._operator_transcript_text = ""
         self._operator_interim_text = ""
+        self._turn_translations.clear()
+        self._caller_interim_text_en = ""
         # Wipe per-channel audio state and dialogue history.
         for state in self.audio_channels.values():
             state.pcm.clear()
