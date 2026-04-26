@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef } from "react";
 import { motion } from "framer-motion";
-import { Languages, Mic } from "lucide-react";
+import { Headphones, Languages, Mic, MicOff } from "lucide-react";
+import type { DialogueTurn } from "../types/dispatch";
+import { DialogueTimeline } from "./DialogueTimeline";
 
 interface Props {
   transcript: string;
@@ -12,6 +14,11 @@ interface Props {
   callerLanguage: string | null;
   callerLanguageName: string | null;
   playbackAudioUrl: string | null;
+  dialogueTurns: DialogueTurn[];
+  callerInterimText: string;
+  workerInterimText: string;
+  workerMicActive: boolean;
+  onToggleWorkerMic: () => void;
 }
 
 export function TranscriptPanel({
@@ -24,7 +31,13 @@ export function TranscriptPanel({
   callerLanguage,
   callerLanguageName,
   playbackAudioUrl,
+  dialogueTurns,
+  callerInterimText,
+  workerInterimText,
+  workerMicActive,
+  onToggleWorkerMic,
 }: Props) {
+  const hasDialogue = dialogueTurns.length > 0 || !!workerInterimText || !!callerInterimText;
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
@@ -81,6 +94,19 @@ export function TranscriptPanel({
               {callerLanguageName}
             </div>
           )}
+          <button
+            type="button"
+            onClick={onToggleWorkerMic}
+            className={`inline-flex items-center gap-1.5 text-[10px] font-semibold tracking-[0.1em] uppercase px-2 py-1 rounded-md border transition-colors ${
+              workerMicActive
+                ? "bg-emerald-900/40 border-emerald-700 text-emerald-200"
+                : "border-[var(--color-border-strong)] text-[var(--color-text-muted)] hover:bg-[var(--color-bg-elevated)]"
+            }`}
+            title={workerMicActive ? "Stop worker mic" : "Start worker mic"}
+          >
+            {workerMicActive ? <MicOff size={11} /> : <Headphones size={11} />}
+            Worker Mic
+          </button>
         </div>
       </div>
 
@@ -88,7 +114,7 @@ export function TranscriptPanel({
         ref={scrollRef}
         className="flex-1 overflow-y-auto px-5 py-4 text-[15px] leading-relaxed"
       >
-        {!transcript && !interimText && !originalTranscript && !originalInterimText ? (
+        {!transcript && !interimText && !originalTranscript && !originalInterimText && !hasDialogue ? (
           <div className="h-full flex items-center justify-center text-center">
             <div className="text-[var(--color-text-dim)]">
               <div className="text-sm mb-1">
@@ -103,6 +129,14 @@ export function TranscriptPanel({
           </div>
         ) : (
           <div className="space-y-4">
+            {hasDialogue && (
+              <DialogueTimeline
+                turns={dialogueTurns}
+                callerInterim={callerInterimText}
+                workerInterim={workerInterimText}
+                highlights={highlights}
+              />
+            )}
             <motion.div
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}

@@ -57,6 +57,24 @@ class TranscriptSegment(BaseModel):
     is_final: bool = True
 
 
+Speaker = Literal["caller", "worker"]
+DialogueSource = Literal["whisper", "web_speech", "typed", "tts_request", "demo"]
+
+
+class DialogueTurn(BaseModel):
+    id: str
+    seq: int
+    speaker: Speaker
+    channel: str
+    source: DialogueSource = "whisper"
+    text: str
+    start: float
+    end: float
+    is_final: bool = True
+    language: Optional[str] = None
+    confidence: Optional[float] = None
+
+
 # ─── WebSocket message envelopes ─────────────────────────────────────────
 
 class ClientStartCall(BaseModel):
@@ -70,6 +88,15 @@ class ClientAudioMeta(BaseModel):
     type: Literal["audio_meta"] = "audio_meta"
     mime: str
     sample_rate: int = 16000
+
+
+class ClientAudioChunkMeta(BaseModel):
+    """Sent right before a binary PCM frame to label its speaker channel."""
+
+    type: Literal["audio_chunk_meta"] = "audio_chunk_meta"
+    speaker: Speaker = "caller"
+    sample_rate: int = 16000
+    seq: Optional[int] = None
 
 
 class ClientStopCall(BaseModel):
@@ -156,3 +183,14 @@ class ServerScenariosList(BaseModel):
 class ServerError(BaseModel):
     type: Literal["error"] = "error"
     message: str
+
+
+class ServerDialogueUpdate(BaseModel):
+    type: Literal["dialogue_update"] = "dialogue_update"
+    turns: list[DialogueTurn]
+    caller_text: str
+    caller_interim_text: Optional[str] = None
+    worker_text: str
+    worker_interim_text: Optional[str] = None
+    full_text: str
+    language: Optional[str] = None

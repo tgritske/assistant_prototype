@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ServerMessageSchema, type ServerMessage } from "../types/dispatch";
+import { ServerMessageSchema, type ServerMessage, type Speaker } from "../types/dispatch";
 
 type Status = "idle" | "connecting" | "open" | "closed" | "error";
 
@@ -15,6 +15,7 @@ export function useDispatchSocket(opts: UseDispatchSocketOptions = {}) {
   const [status, setStatus] = useState<Status>("idle");
   const wsRef = useRef<WebSocket | null>(null);
   const retryRef = useRef<number>(0);
+  const audioSeqRef = useRef<number>(0);
   const onMessageRef = useRef(opts.onMessage);
   onMessageRef.current = opts.onMessage;
 
@@ -92,5 +93,22 @@ export function useDispatchSocket(opts: UseDispatchSocketOptions = {}) {
     return true;
   }, []);
 
-  return { status, send, sendBinary };
+  // Tags the next binary frame with a speaker channel via a JSON precursor.
+  // The backend pairs the meta with the next bytes message (default: caller).
+  const sendAudioChunk = useCallback((speaker: Speaker, data: ArrayBuffer) => {
+    const ws = wsRef.current;
+    if (!ws || ws.readyState !== 1) return false;
+    ws.send(
+      JSON.stringify({
+        type: "audio_chunk_meta",
+        speaker,
+        sample_rate: 16000,
+        seq: audioSeqRef.current++,
+      }),
+    );
+    ws.send(data);
+    return true;
+  }, []);
+
+  return { status, send, sendBinary, sendAudioChunk };
 }

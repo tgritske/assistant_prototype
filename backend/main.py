@@ -16,6 +16,7 @@ import logging
 import os
 import time
 import uuid
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal, Optional
 
@@ -28,6 +29,8 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 from scenarios import SCENARIOS, get_scenario, scenarios_summary
 from schemas import (
     ClaudeExtraction,
+    DialogueTurn,
+    Speaker,
     TranscriptSegment,
 )
 from services.form_normalizer import normalize_extraction
@@ -145,6 +148,25 @@ async def tts_endpoint(text: str, language: str = "en-US"):
 # ─── WebSocket session ────────────────────────────────────────────────────
 
 
+@dataclass
+class AudioChannelState:
+    """Per-speaker audio capture state.
+
+    Each channel maintains its own queue, pending PCM buffer, sample counters
+    (for synthesizing segment timestamps), language votes, and processor task.
+    Separating these lets caller and worker speech be transcribed in parallel
+    without their text getting interleaved into one stream.
+    """
+
+    speaker: Speaker
+    queue: asyncio.Queue
+    pcm: list[np.ndarray] = field(default_factory=list)
+    total_samples: int = 0
+    transcribed_samples: int = 0
+    task: Optional[asyncio.Task] = None
+    lang_votes: dict[str, int] = field(default_factory=dict)
+
+
 class CallSession:
     """State for a single call on the WebSocket.
 
@@ -179,13 +201,21 @@ class CallSession:
         self._claude_rerun_queued = False
         self._last_claude_started_time: float = 0.0
         self._llm_ok: Optional[bool] = None  # None=unknown, True=alive, False=failing
-        # Live-mic pending-audio buffer (cleared after each transcription — no overlap)
-        self._live_pcm: list[np.ndarray] = []
-        self._live_total_samples: int = 0   # samples in pending buffer
-        self._live_transcribed_samples: int = 0  # cumulative samples transcribed (for timestamps)
-        self._lang_votes: dict[str, int] = {}  # language detection votes
-        self._audio_queue: asyncio.Queue = asyncio.Queue(maxsize=20)
-        self._audio_proc_task: Optional[asyncio.Task] = None
+        # Per-speaker audio channels. Each channel has its own queue, pending
+        # PCM buffer, language votes and processor task.
+        self.audio_channels: dict[Speaker, AudioChannelState] = {
+            "caller": AudioChannelState("caller", asyncio.Queue(maxsize=20)),
+            "worker": AudioChannelState("worker", asyncio.Queue(maxsize=20)),
+        }
+        # Worker language is fixed to English by default (dispatcher language).
+        # Caller language stays in self.language and is detected dynamically.
+        self.worker_language: Optional[str] = "en"
+        # Speaker-attributed dialogue history. Caller turns also get appended
+        # to final_segments for back-compat with existing extractor properties.
+        self.dialogue_turns: list[DialogueTurn] = []
+        self._dialogue_seq: int = 0
+        # Pending speaker label for the next binary frame (set by audio_chunk_meta).
+        self._next_audio_meta: Optional[dict] = None
         self._scenario_task: Optional[asyncio.Task] = None
         self._translation_task: Optional[asyncio.Task] = None
         self._translation_rerun_queued = False
@@ -225,8 +255,60 @@ class CallSession:
 
     @property
     def transcript_for_extraction(self) -> str:
+        # Caller-only by design: incident facts must come from caller speech.
+        # Worker speech is exposed separately via worker_text for prompt context.
         parts = [self.full_transcript, self.interim_text]
         return " ".join(part for part in parts if part).strip()
+
+    @property
+    def caller_final_text(self) -> str:
+        """All finalized caller turns joined as one string."""
+        return " ".join(
+            t.text.strip()
+            for t in self.dialogue_turns
+            if t.speaker == "caller" and t.is_final and t.text.strip()
+        )
+
+    @property
+    def caller_interim_text(self) -> str:
+        for t in reversed(self.dialogue_turns):
+            if t.speaker == "caller" and not t.is_final:
+                return t.text.strip()
+        return ""
+
+    @property
+    def worker_final_text(self) -> str:
+        return " ".join(
+            t.text.strip()
+            for t in self.dialogue_turns
+            if t.speaker == "worker" and t.is_final and t.text.strip()
+        )
+
+    @property
+    def worker_interim_text(self) -> str:
+        for t in reversed(self.dialogue_turns):
+            if t.speaker == "worker" and not t.is_final:
+                return t.text.strip()
+        return ""
+
+    def _next_turn_id(self) -> tuple[int, str]:
+        self._dialogue_seq += 1
+        return self._dialogue_seq, f"{self.call_id}-{self._dialogue_seq}"
+
+    async def _send_dialogue_update(self):
+        """Broadcast the speaker-labeled dialogue snapshot to the client."""
+        await self.send(
+            {
+                "type": "dialogue_update",
+                "turns": [t.model_dump() for t in self.dialogue_turns[-20:]],
+                "caller_text": self.caller_final_text,
+                "caller_interim_text": self.caller_interim_text or None,
+                "worker_text": self.worker_final_text,
+                "worker_interim_text": self.worker_interim_text or None,
+                "full_text": self.full_transcript,
+                "language": self.language,
+            }
+        )
 
     @property
     def operator_transcript_for_extraction(self) -> str:
@@ -528,13 +610,27 @@ class CallSession:
 
     # ─── audio → STT ──
 
-    def _start_audio_processor(self):
-        """Cancel any running audio processor and start a fresh one."""
-        if self._audio_proc_task and not self._audio_proc_task.done():
-            self._audio_proc_task.cancel()
-        self._audio_proc_task = asyncio.create_task(self._audio_processor_loop())
+    def _start_audio_processor(self, speaker: Speaker = "caller"):
+        """Cancel any running audio processor for this speaker and start fresh."""
+        state = self.audio_channels[speaker]
+        if state.task and not state.task.done():
+            state.task.cancel()
+        state.task = asyncio.create_task(self._audio_processor_loop(speaker, state))
 
-    async def _audio_processor_loop(self):
+    def route_audio_chunk(self, speaker: Speaker, pcm: np.ndarray):
+        """Drop a PCM frame onto the channel's queue. Lazily starts the processor."""
+        state = self.audio_channels.get(speaker)
+        if state is None:
+            log.warning("[%s] unknown speaker %s, dropping chunk", self.call_id, speaker)
+            return
+        if state.task is None or state.task.done():
+            self._start_audio_processor(speaker)
+        try:
+            state.queue.put_nowait(pcm)
+        except asyncio.QueueFull:
+            log.debug("[%s] %s audio queue full, dropping chunk", self.call_id, speaker)
+
+    async def _audio_processor_loop(self, speaker: Speaker, state: AudioChannelState):
         """Single persistent task: drain audio queue → transcribe → append.
 
         Key design decisions vs the previous rolling-window approach:
@@ -557,12 +653,12 @@ class CallSession:
         epoch = self._call_epoch
         # Minimum NEW audio before we bother calling Whisper.
         CHUNK_MIN = int(LIVE_MIN_SEC * SAMPLE_RATE)
+        is_caller = speaker == "caller"
 
         try:
             while True:
-                # Wait for the first chunk; timeout lets us check epoch regularly
                 try:
-                    pcm = await asyncio.wait_for(self._audio_queue.get(), timeout=1.0)
+                    pcm = await asyncio.wait_for(state.queue.get(), timeout=1.0)
                 except asyncio.TimeoutError:
                     if self._call_epoch != epoch:
                         return
@@ -573,34 +669,29 @@ class CallSession:
 
                 self.last_audio_time = time.monotonic()
 
-                # Drain any additional chunks that queued up while we were busy
                 new_chunks = [pcm]
-                while not self._audio_queue.empty():
-                    new_chunks.append(self._audio_queue.get_nowait())
+                while not state.queue.empty():
+                    new_chunks.append(state.queue.get_nowait())
 
-                # Accumulate into the pending buffer
                 for chunk in new_chunks:
-                    self._live_pcm.append(chunk)
-                    self._live_total_samples += chunk.shape[0]
+                    state.pcm.append(chunk)
+                    state.total_samples += chunk.shape[0]
 
-                # Not enough audio yet — wait for more chunks
-                if self._live_total_samples < CHUNK_MIN:
+                if state.total_samples < CHUNK_MIN:
                     continue
 
-                # Snapshot and clear the pending buffer so the NEXT iteration
-                # starts fresh (no overlap → no re-transcription artifacts).
-                audio_chunk = np.concatenate(self._live_pcm)
-                self._live_pcm.clear()
-                self._live_total_samples = 0
-                self._live_transcribed_samples += audio_chunk.shape[0]
+                audio_chunk = np.concatenate(state.pcm)
+                state.pcm.clear()
+                state.total_samples = 0
+                state.transcribed_samples += audio_chunk.shape[0]
 
-                # Language hint (base code only, e.g. "ru" not "ru-RU")
-                lang_hint: Optional[str] = None
-                if self.language:
-                    lang_hint = self.language.split("-")[0]
-
-                # Last 30 words give Whisper sentence context and spelling cues
-                prompt = " ".join(self.full_transcript.split()[-30:]) or None
+                # Language hint: caller is dynamic, worker is fixed to English.
+                if is_caller:
+                    lang_hint: Optional[str] = self.language.split("-")[0] if self.language else None
+                    prompt = " ".join(self.full_transcript.split()[-30:]) or None
+                else:
+                    lang_hint = (self.worker_language or "en").split("-")[0]
+                    prompt = " ".join(self.worker_final_text.split()[-30:]) or None
 
                 segments, detected_lang = await self.transcriber.transcribe_array(
                     audio_chunk,
@@ -610,16 +701,15 @@ class CallSession:
                 )
 
                 if self._call_epoch != epoch:
-                    return  # session reset during Whisper inference → discard
+                    return
 
-                # Require 2 consistent detections before locking language so a
-                # single noisy chunk can't permanently lock the wrong language.
-                if detected_lang and not self.language:
-                    self._lang_votes[detected_lang] = (
-                        self._lang_votes.get(detected_lang, 0) + 1
+                # Caller language voting; worker language stays fixed (English).
+                if is_caller and detected_lang and not self.language:
+                    state.lang_votes[detected_lang] = (
+                        state.lang_votes.get(detected_lang, 0) + 1
                     )
-                    top = max(self._lang_votes, key=lambda k: self._lang_votes[k])
-                    if self._lang_votes[top] >= 2:
+                    top = max(state.lang_votes, key=lambda k: state.lang_votes[k])
+                    if state.lang_votes[top] >= 2:
                         self.language = top
                         log.info("[%s] language locked → %s", self.call_id, top)
 
@@ -632,41 +722,69 @@ class CallSession:
                 if not new_text.strip():
                     continue
 
-                # Straight append — no merge needed since there is no overlap
-                t_end = self._live_transcribed_samples / SAMPLE_RATE
-                ts_seg = TranscriptSegment(
-                    text=new_text,
-                    start=max(0.0, t_end - audio_chunk.shape[0] / SAMPLE_RATE),
-                    end=t_end,
-                    is_final=True,
+                t_end = state.transcribed_samples / SAMPLE_RATE
+                t_start = max(0.0, t_end - audio_chunk.shape[0] / SAMPLE_RATE)
+
+                # Append to dialogue_turns regardless of speaker.
+                seq, turn_id = self._next_turn_id()
+                turn_lang = self.language if is_caller else self.worker_language
+                self.dialogue_turns.append(
+                    DialogueTurn(
+                        id=turn_id,
+                        seq=seq,
+                        speaker=speaker,
+                        channel="live_mic",
+                        source="whisper",
+                        text=new_text,
+                        start=t_start,
+                        end=t_end,
+                        is_final=True,
+                        language=turn_lang,
+                    )
                 )
-                self.final_segments.append(ts_seg)
-                await self.send(
-                    {
-                        "type": "transcript_update",
-                        "segments": [s.model_dump() for s in self.final_segments[-5:]],
-                        "full_text": self.full_transcript,
-                        "interim_text": None,
-                        "operator_text": self.operator_transcript,
-                        "operator_interim_text": None,
-                        "language": self.language,
-                    }
-                )
-                self._schedule_translation()
+
+                if is_caller:
+                    # Caller speech also feeds the legacy transcript pipeline
+                    # so existing extractor properties + transcript_update UI
+                    # continue to work unchanged.
+                    self.final_segments.append(
+                        TranscriptSegment(
+                            text=new_text,
+                            start=t_start,
+                            end=t_end,
+                            is_final=True,
+                        )
+                    )
+                    await self.send(
+                        {
+                            "type": "transcript_update",
+                            "segments": [s.model_dump() for s in self.final_segments[-5:]],
+                            "full_text": self.full_transcript,
+                            "interim_text": None,
+                            "operator_text": self.operator_transcript,
+                            "operator_interim_text": None,
+                            "language": self.language,
+                        }
+                    )
+                    self._schedule_translation()
+
+                await self._send_dialogue_update()
+                # Worker speech triggers an extraction pass too, but extraction
+                # uses caller text only; the LLM may use worker context later
+                # to deduplicate questions/instructions in suggestions.
                 self._schedule_claude()
 
         except asyncio.CancelledError:
-            # Best-effort tail flush on raw disconnect: only if ws still alive
-            # and there's actually pending PCM. Errors here must not propagate.
+            # Best-effort tail flush on raw disconnect, per-channel.
             if (
-                self._live_total_samples > 0
+                state.total_samples > 0
                 and self.ws.client_state.name == "CONNECTED"
                 and self._call_epoch == epoch
             ):
                 try:
-                    await self._flush_pending_audio(epoch)
+                    await self._flush_pending_audio(epoch, speaker)
                 except Exception:
-                    log.exception("[%s] cancel-path flush failed", self.call_id)
+                    log.exception("[%s] %s cancel-path flush failed", self.call_id, speaker)
             return
 
     # ─── demo playback ──
@@ -721,6 +839,21 @@ class CallSession:
         # next phrase early and produced repeated / mutated fragments.
         STEP_SEC = float(os.environ.get("SCENARIO_WHISPER_CHUNK_SEC", "4.0"))
         language_hint: Optional[str] = scen.language.split("-")[0] if scen.language else None
+
+        # Dialog mode: if a per-turn manifest exists, transcribe each turn with
+        # its true speaker label so the dialogue timeline shows caller/worker
+        # turns correctly. The browser still plays the mixed MP3.
+        manifest_path = DEMO_DIR / scenario_id / "manifest.json"
+        if manifest_path.exists():
+            try:
+                manifest = json.loads(manifest_path.read_text())
+            except Exception:
+                manifest = None
+            if manifest and manifest.get("turns"):
+                await self._play_dialog_scenario(
+                    scenario_id, scen, manifest, epoch, language_hint
+                )
+                return
 
         # Cache so _finalize_before_reset can run the canonical final-pass even
         # if the streaming loop is cancelled mid-way (e.g. user clicks Stop).
@@ -789,6 +922,22 @@ class CallSession:
                         is_final=True,
                     )
                 )
+                # Single-MP3 demo audio is treated as caller speech.
+                seq, turn_id = self._next_turn_id()
+                self.dialogue_turns.append(
+                    DialogueTurn(
+                        id=turn_id,
+                        seq=seq,
+                        speaker="caller",
+                        channel="demo",
+                        source="demo",
+                        text=new_text,
+                        start=cursor_sec,
+                        end=next_cursor,
+                        is_final=True,
+                        language=lang,
+                    )
+                )
                 await self.send(
                     {
                         "type": "transcript_update",
@@ -803,6 +952,7 @@ class CallSession:
                     }
                 )
                 self._schedule_translation()
+                await self._send_dialogue_update()
                 self.last_audio_time = time.monotonic()
                 self._schedule_claude()
 
@@ -817,6 +967,125 @@ class CallSession:
                 log.exception("[%s] scenario final-pass failed", self.call_id)
 
         # Mop-up pass
+        await asyncio.sleep(0.2)
+        if self._call_epoch != epoch or not self.started or self.scenario_id != scenario_id:
+            return
+        self._schedule_claude(forced=True)
+        await self.send({"type": "scenario_finished", "scenario_id": scenario_id})
+
+    async def _play_dialog_scenario(
+        self,
+        scenario_id: str,
+        scen,
+        manifest: dict,
+        epoch: int,
+        caller_lang_hint: Optional[str],
+    ):
+        """Per-turn dialog playback. Iterates the manifest turns, transcribes
+        each per-turn audio file with the appropriate speaker label, and emits
+        dialogue_update + transcript_update (caller-only) for each.
+
+        Pacing: sleep for the turn's audio duration so backend dialogue updates
+        roughly match the browser's mixed-audio playback timeline.
+        """
+        pace_realtime = os.environ.get("SCENARIO_PACE_REALTIME", "1") not in ("0", "false", "False", "")
+        scen_dir = DEMO_DIR / scenario_id
+        cumulative_sec = 0.0
+        turns = manifest["turns"]
+
+        for turn_meta in turns:
+            if self._call_epoch != epoch or not self.started or self.scenario_id != scenario_id:
+                return
+
+            speaker = turn_meta.get("speaker", "caller")
+            if speaker not in ("caller", "worker"):
+                speaker = "caller"
+            turn_path = scen_dir / turn_meta["file"]
+            if not turn_path.exists():
+                log.warning("[%s] missing turn file %s", self.call_id, turn_path)
+                continue
+
+            turn_pcm = await asyncio.to_thread(
+                _decode_mp3_to_pcm, str(turn_path), SAMPLE_RATE
+            )
+            if turn_pcm.shape[0] == 0:
+                continue
+            turn_dur = turn_pcm.shape[0] / SAMPLE_RATE
+            is_caller = speaker == "caller"
+            lang_hint = caller_lang_hint if is_caller else "en"
+            prompt = (
+                " ".join(self.full_transcript.split()[-30:])
+                if is_caller
+                else " ".join(self.worker_final_text.split()[-30:])
+            ) or None
+
+            if pace_realtime:
+                # Run pacing + transcription concurrently so wall time per turn
+                # is max(turn_dur, inference_time), keeping playback in sync.
+                sleep_task = asyncio.create_task(asyncio.sleep(turn_dur))
+                transcribe_task = asyncio.create_task(
+                    self.transcriber.transcribe_array(
+                        turn_pcm, language=lang_hint, use_vad=False
+                    )
+                )
+                await sleep_task
+                segments, _ = await transcribe_task
+            else:
+                segments, _ = await self.transcriber.transcribe_array(
+                    turn_pcm, language=lang_hint, use_vad=False
+                )
+
+            if self._call_epoch != epoch or not self.started or self.scenario_id != scenario_id:
+                return
+
+            text = " ".join(s.text.strip() for s in segments if s.text.strip()).strip()
+            if not text:
+                cumulative_sec += turn_dur
+                continue
+
+            t_start = cumulative_sec
+            t_end = cumulative_sec + turn_dur
+            cumulative_sec = t_end
+
+            seq, turn_id = self._next_turn_id()
+            self.dialogue_turns.append(
+                DialogueTurn(
+                    id=turn_id,
+                    seq=seq,
+                    speaker=speaker,
+                    channel="demo",
+                    source="demo",
+                    text=text,
+                    start=t_start,
+                    end=t_end,
+                    is_final=True,
+                    language=(scen.language if is_caller else "en"),
+                )
+            )
+
+            if is_caller:
+                self.final_segments.append(
+                    TranscriptSegment(text=text, start=t_start, end=t_end, is_final=True)
+                )
+                if scen.language and not self.language:
+                    self.language = scen.language
+                await self.send(
+                    {
+                        "type": "transcript_update",
+                        "segments": [self.final_segments[-1].model_dump()],
+                        "full_text": self.full_transcript,
+                        "interim_text": None,
+                        "operator_text": self.operator_transcript,
+                        "operator_interim_text": None,
+                        "language": scen.language,
+                    }
+                )
+                self._schedule_translation()
+
+            await self._send_dialogue_update()
+            self.last_audio_time = time.monotonic()
+            self._schedule_claude()
+
         await asyncio.sleep(0.2)
         if self._call_epoch != epoch or not self.started or self.scenario_id != scenario_id:
             return
@@ -860,14 +1129,34 @@ class CallSession:
             return False
 
         # Replace streamed segments with one canonical span [0, total_sec].
+        end_sec = self._scenario_total_sec or (pcm.shape[0] / SAMPLE_RATE)
         canonical = TranscriptSegment(
             text=text,
             start=0.0,
-            end=self._scenario_total_sec or (pcm.shape[0] / SAMPLE_RATE),
+            end=end_sec,
             is_final=True,
         )
         self.final_segments = [canonical]
         self.provisional_segment = None
+
+        # Drop the streamed caller turns and replace with one canonical turn,
+        # while preserving any worker turns that came in mid-call.
+        worker_turns = [t for t in self.dialogue_turns if t.speaker == "worker"]
+        seq, turn_id = self._next_turn_id()
+        canonical_turn = DialogueTurn(
+            id=turn_id,
+            seq=seq,
+            speaker="caller",
+            channel="demo",
+            source="demo",
+            text=text,
+            start=0.0,
+            end=end_sec,
+            is_final=True,
+            language=lang,
+        )
+        # Order: caller first, then worker turns sorted by their original seq.
+        self.dialogue_turns = [canonical_turn] + sorted(worker_turns, key=lambda t: t.seq)
 
         if lang and not self.language:
             self.language = lang
@@ -884,38 +1173,52 @@ class CallSession:
             }
         )
         self._schedule_translation()
+        await self._send_dialogue_update()
         self._schedule_claude(forced=True)
         return True
 
-    async def _flush_pending_audio(self, epoch: int) -> bool:
-        """Drain queue + transcribe sub-LIVE_MIN_SEC tail. Live-mic safety net."""
+    async def _flush_pending_audio(
+        self, epoch: int, speaker: Optional[Speaker] = None
+    ) -> bool:
+        """Drain queue + transcribe sub-LIVE_MIN_SEC tail for one channel,
+        or for both channels when `speaker` is None."""
         if self._call_epoch != epoch:
             return False
+        if speaker is None:
+            any_flushed = False
+            for s in ("caller", "worker"):
+                any_flushed |= await self._flush_pending_audio(epoch, s)  # type: ignore[arg-type]
+            return any_flushed
 
-        # Drain anything still in the queue into _live_pcm.
-        while not self._audio_queue.empty():
-            try:
-                pcm = self._audio_queue.get_nowait()
-            except asyncio.QueueEmpty:
-                break
-            self._live_pcm.append(pcm)
-            self._live_total_samples += pcm.shape[0]
-
-        if self._live_total_samples < int(0.2 * SAMPLE_RATE):
-            # Nothing meaningful pending.
-            self._live_pcm.clear()
-            self._live_total_samples = 0
+        state = self.audio_channels.get(speaker)
+        if state is None:
             return False
 
-        audio_chunk = np.concatenate(self._live_pcm)
-        self._live_pcm.clear()
-        self._live_total_samples = 0
-        self._live_transcribed_samples += audio_chunk.shape[0]
+        while not state.queue.empty():
+            try:
+                pcm = state.queue.get_nowait()
+            except asyncio.QueueEmpty:
+                break
+            state.pcm.append(pcm)
+            state.total_samples += pcm.shape[0]
 
-        lang_hint: Optional[str] = None
-        if self.language:
-            lang_hint = self.language.split("-")[0]
-        prompt = " ".join(self.full_transcript.split()[-30:]) or None
+        if state.total_samples < int(0.2 * SAMPLE_RATE):
+            state.pcm.clear()
+            state.total_samples = 0
+            return False
+
+        audio_chunk = np.concatenate(state.pcm)
+        state.pcm.clear()
+        state.total_samples = 0
+        state.transcribed_samples += audio_chunk.shape[0]
+
+        is_caller = speaker == "caller"
+        if is_caller:
+            lang_hint: Optional[str] = self.language.split("-")[0] if self.language else None
+            prompt = " ".join(self.full_transcript.split()[-30:]) or None
+        else:
+            lang_hint = (self.worker_language or "en").split("-")[0]
+            prompt = " ".join(self.worker_final_text.split()[-30:]) or None
 
         try:
             segments, detected_lang = await self.transcriber.transcribe_array(
@@ -927,7 +1230,7 @@ class CallSession:
         except asyncio.CancelledError:
             raise
         except Exception:
-            log.exception("[%s] live-mic flush transcription failed", self.call_id)
+            log.exception("[%s] %s flush transcription failed", self.call_id, speaker)
             return False
 
         if self._call_epoch != epoch:
@@ -937,29 +1240,52 @@ class CallSession:
         if not new_text:
             return False
 
-        if detected_lang and not self.language:
+        if is_caller and detected_lang and not self.language:
             self.language = detected_lang
 
-        t_end = self._live_transcribed_samples / SAMPLE_RATE
-        ts_seg = TranscriptSegment(
-            text=new_text,
-            start=max(0.0, t_end - audio_chunk.shape[0] / SAMPLE_RATE),
-            end=t_end,
-            is_final=True,
+        t_end = state.transcribed_samples / SAMPLE_RATE
+        t_start = max(0.0, t_end - audio_chunk.shape[0] / SAMPLE_RATE)
+
+        seq, turn_id = self._next_turn_id()
+        turn_lang = self.language if is_caller else self.worker_language
+        self.dialogue_turns.append(
+            DialogueTurn(
+                id=turn_id,
+                seq=seq,
+                speaker=speaker,
+                channel="live_mic",
+                source="whisper",
+                text=new_text,
+                start=t_start,
+                end=t_end,
+                is_final=True,
+                language=turn_lang,
+            )
         )
-        self.final_segments.append(ts_seg)
-        await self.send(
-            {
-                "type": "transcript_update",
-                "segments": [s.model_dump() for s in self.final_segments[-5:]],
-                "full_text": self.full_transcript,
-                "interim_text": None,
-                "operator_text": self.operator_transcript,
-                "operator_interim_text": None,
-                "language": self.language,
-            }
-        )
-        self._schedule_translation()
+
+        if is_caller:
+            self.final_segments.append(
+                TranscriptSegment(
+                    text=new_text,
+                    start=t_start,
+                    end=t_end,
+                    is_final=True,
+                )
+            )
+            await self.send(
+                {
+                    "type": "transcript_update",
+                    "segments": [s.model_dump() for s in self.final_segments[-5:]],
+                    "full_text": self.full_transcript,
+                    "interim_text": None,
+                    "operator_text": self.operator_transcript,
+                    "operator_interim_text": None,
+                    "language": self.language,
+                }
+            )
+            self._schedule_translation()
+
+        await self._send_dialogue_update()
         self._schedule_claude(forced=True)
         return True
 
@@ -990,9 +1316,10 @@ class CallSession:
             self._claude_task.cancel()
         self._claude_task = None
         self._claude_rerun_queued = False
-        if self._audio_proc_task and not self._audio_proc_task.done():
-            self._audio_proc_task.cancel()
-        self._audio_proc_task = None
+        for state in self.audio_channels.values():
+            if state.task and not state.task.done():
+                state.task.cancel()
+            state.task = None
         if self._scenario_task and not self._scenario_task.done():
             self._scenario_task.cancel()
         self._scenario_task = None
@@ -1025,16 +1352,24 @@ class CallSession:
         self.input_mode = "live_text"
         self._operator_transcript_text = ""
         self._operator_interim_text = ""
-        self._live_pcm.clear()
-        self._live_total_samples = 0
-        self._live_transcribed_samples = 0
-        self._lang_votes.clear()
+        # Wipe per-channel audio state and dialogue history.
+        for state in self.audio_channels.values():
+            state.pcm.clear()
+            state.total_samples = 0
+            state.transcribed_samples = 0
+            state.lang_votes.clear()
+            while not state.queue.empty():
+                try:
+                    state.queue.get_nowait()
+                except asyncio.QueueEmpty:
+                    break
+        self.dialogue_turns.clear()
+        self._dialogue_seq = 0
+        self._next_audio_meta = None
+        self.worker_language = "en"
         self._scenario_pcm = None
         self._scenario_lang_hint = None
         self._scenario_total_sec = 0.0
-        # Drain any leftover audio from the old call
-        while not self._audio_queue.empty():
-            self._audio_queue.get_nowait()
 
     async def stop(self):
         try:
@@ -1156,18 +1491,21 @@ async def websocket_endpoint(ws: WebSocket):
             if "text" in msg and msg["text"] is not None:
                 await _handle_text(session, msg["text"])
             elif "bytes" in msg and msg["bytes"] is not None:
-                # Binary = raw PCM16 mono @ 16kHz from live mic
+                # Binary = raw PCM16 mono @ 16kHz from live mic. The preceding
+                # audio_chunk_meta JSON (if any) tells us which speaker channel
+                # this chunk belongs to; absent meta defaults to "caller".
                 if not session.started:
                     continue
                 if session.input_mode == "live_text":
                     session.input_mode = "live_audio"
-                    session._start_audio_processor()
+                meta = session._next_audio_meta or {}
+                session._next_audio_meta = None
+                speaker = meta.get("speaker", "caller")
+                if speaker not in ("caller", "worker"):
+                    speaker = "caller"
                 pcm16 = np.frombuffer(msg["bytes"], dtype=np.int16)
                 pcm = pcm16.astype(np.float32) / 32768.0
-                try:
-                    session._audio_queue.put_nowait(pcm)
-                except asyncio.QueueFull:
-                    log.debug("[%s] audio queue full, dropping chunk", session.call_id)
+                session.route_audio_chunk(speaker, pcm)
             elif msg.get("type") == "websocket.disconnect":
                 break
     except WebSocketDisconnect:
@@ -1194,7 +1532,9 @@ async def _handle_text(session: CallSession, raw: str):
         session.started = True
         session.input_mode = data.get("input_mode") or "live_text"
         if session.input_mode == "live_audio":
-            session._start_audio_processor()
+            # Caller is the default channel; worker processor starts lazily
+            # when the first worker chunk arrives via route_audio_chunk.
+            session._start_audio_processor("caller")
         await session.send(
             {
                 "type": "call_started",
@@ -1202,6 +1542,13 @@ async def _handle_text(session: CallSession, raw: str):
                 "scenario_id": data.get("scenario_id"),
             }
         )
+
+    elif t == "audio_chunk_meta":
+        # Pair the meta with the next binary frame. Validate speaker.
+        speaker = data.get("speaker", "caller")
+        if speaker not in ("caller", "worker"):
+            speaker = "caller"
+        session._next_audio_meta = {"speaker": speaker, "seq": data.get("seq")}
 
     elif t == "stop_call":
         try:
@@ -1275,49 +1622,98 @@ async def _handle_text(session: CallSession, raw: str):
             return
         text = (data.get("text") or "").strip()
         is_final = bool(data.get("is_final", True))
+        speaker = data.get("speaker", "caller")
+        if speaker not in ("caller", "worker"):
+            speaker = "caller"
+        source = data.get("source") or "web_speech"
+        if source not in ("whisper", "web_speech", "typed", "tts_request", "demo"):
+            source = "web_speech"
         if not text:
             return
 
         session.last_audio_time = time.monotonic()
+        is_caller = speaker == "caller"
 
         if is_final:
-            new_text = _merge_incremental(session.full_transcript, text)
+            ref_text = session.full_transcript if is_caller else session.worker_final_text
+            new_text = _merge_incremental(ref_text, text)
+            t_now = time.monotonic()
             if new_text.strip():
-                t_now = time.monotonic()
-                session.final_segments.append(
-                    TranscriptSegment(text=new_text, start=t_now, end=t_now, is_final=True)
+                seq, turn_id = session._next_turn_id()
+                session.dialogue_turns.append(
+                    DialogueTurn(
+                        id=turn_id,
+                        seq=seq,
+                        speaker=speaker,
+                        channel=f"{speaker}_text",
+                        source=source,
+                        text=new_text,
+                        start=t_now,
+                        end=t_now,
+                        is_final=True,
+                        language=session.language if is_caller else session.worker_language,
+                    )
                 )
-            session.provisional_segment = None
-            await session.send({
-                "type": "transcript_update",
-                "segments": [s.model_dump() for s in session.final_segments[-5:]],
-                "full_text": session.full_transcript,
-                "interim_text": None,
-                "operator_text": session.operator_transcript,
-                "operator_interim_text": None,
-                "language": session.language,
-            })
-            session._schedule_translation()
+                if is_caller:
+                    session.final_segments.append(
+                        TranscriptSegment(text=new_text, start=t_now, end=t_now, is_final=True)
+                    )
+            if is_caller:
+                session.provisional_segment = None
+                await session.send({
+                    "type": "transcript_update",
+                    "segments": [s.model_dump() for s in session.final_segments[-5:]],
+                    "full_text": session.full_transcript,
+                    "interim_text": None,
+                    "operator_text": session.operator_transcript,
+                    "operator_interim_text": None,
+                    "language": session.language,
+                })
+                session._schedule_translation()
+            await session._send_dialogue_update()
             session._schedule_claude(forced=True)
         else:
-            interim_text = _merge_incremental(session.full_transcript, text) or text
-            session.provisional_segment = TranscriptSegment(
-                text=interim_text,
-                start=time.monotonic(),
-                end=time.monotonic(),
-                is_final=False,
+            ref_text = session.full_transcript if is_caller else session.worker_final_text
+            interim_text = _merge_incremental(ref_text, text) or text
+            t_now = time.monotonic()
+            if is_caller:
+                session.provisional_segment = TranscriptSegment(
+                    text=interim_text,
+                    start=t_now,
+                    end=t_now,
+                    is_final=False,
+                )
+                display = session.final_segments[-4:] + [session.provisional_segment]
+                await session.send({
+                    "type": "transcript_update",
+                    "segments": [s.model_dump() for s in display],
+                    "full_text": session.full_transcript,
+                    "interim_text": session.interim_text,
+                    "operator_text": session.operator_transcript,
+                    "operator_interim_text": session.operator_interim_text,
+                    "language": session.language,
+                })
+                session._schedule_translation()
+            # Replace any prior interim turn for this speaker with the new one.
+            session.dialogue_turns = [
+                tt for tt in session.dialogue_turns if not (tt.speaker == speaker and not tt.is_final)
+            ]
+            seq, turn_id = session._next_turn_id()
+            session.dialogue_turns.append(
+                DialogueTurn(
+                    id=turn_id,
+                    seq=seq,
+                    speaker=speaker,
+                    channel=f"{speaker}_text",
+                    source=source,
+                    text=interim_text,
+                    start=t_now,
+                    end=t_now,
+                    is_final=False,
+                    language=session.language if is_caller else session.worker_language,
+                )
             )
-            display = session.final_segments[-4:] + [session.provisional_segment]
-            await session.send({
-                "type": "transcript_update",
-                "segments": [s.model_dump() for s in display],
-                "full_text": session.full_transcript,
-                "interim_text": session.interim_text,
-                "operator_text": session.operator_transcript,
-                "operator_interim_text": session.operator_interim_text,
-                "language": session.language,
-            })
-            session._schedule_translation()
+            await session._send_dialogue_update()
             session._schedule_claude()
 
     elif t == "list_scenarios":

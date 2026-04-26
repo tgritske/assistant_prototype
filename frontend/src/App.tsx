@@ -16,10 +16,21 @@ export default function App() {
   const { state, onServerMessage, setConnected, editField, dismissSuggestion, clearError } =
     useCallState();
 
-  const { status, send, sendBinary } = useDispatchSocket({ onMessage: onServerMessage });
+  const { status, send, sendAudioChunk } = useDispatchSocket({ onMessage: onServerMessage });
 
-  const { isRecording, error: micError, start: startMic, stop: stopMic } =
-    useAudioCapture(sendBinary);
+  const callerMic = useAudioCapture(
+    useCallback((data) => sendAudioChunk("caller", data), [sendAudioChunk])
+  );
+  const workerMic = useAudioCapture(
+    useCallback((data) => sendAudioChunk("worker", data), [sendAudioChunk])
+  );
+  const { isRecording, error: micError, start: startMic, stop: stopMic } = callerMic;
+  const {
+    isRecording: workerRecording,
+    error: workerMicError,
+    start: startWorkerMic,
+    stop: stopWorkerMic,
+  } = workerMic;
 
   useEffect(() => setConnected(status === "open"), [status, setConnected]);
 
@@ -43,10 +54,13 @@ export default function App() {
     return () => clearInterval(t);
   }, [state.inCall]);
 
-  // Stop mic when call ends (scenario finished or manual stop)
+  // Stop both mics when call ends (scenario finished or manual stop)
   useEffect(() => {
-    if (!state.inCall && isRecording) stopMic();
-  }, [state.inCall, isRecording, stopMic]);
+    if (!state.inCall) {
+      if (isRecording) stopMic();
+      if (workerRecording) stopWorkerMic();
+    }
+  }, [state.inCall, isRecording, workerRecording, stopMic, stopWorkerMic]);
 
   const playScenario = useCallback(
     (id: string) => {
@@ -56,13 +70,24 @@ export default function App() {
   );
   const stopCall = useCallback(() => {
     stopMic();
+    stopWorkerMic();
     send({ type: "stop_call" });
-  }, [send, stopMic]);
+  }, [send, stopMic, stopWorkerMic]);
 
   const startLiveMic = useCallback(async () => {
     send({ type: "start_call", input_mode: "live_audio" });
     await startMic();
   }, [send, startMic]);
+
+  const toggleWorkerMic = useCallback(async () => {
+    if (workerRecording) {
+      stopWorkerMic();
+    } else {
+      // Worker mic also requires an active call so backend has a session.
+      if (!state.inCall) send({ type: "start_call", input_mode: "live_audio" });
+      await startWorkerMic();
+    }
+  }, [workerRecording, stopWorkerMic, startWorkerMic, state.inCall, send]);
 
   const sendManualEdit = useCallback(
     (field: keyof FormFields, value: unknown) => {
@@ -100,13 +125,13 @@ export default function App() {
         llmMode={state.llmMode}
       />
 
-      {(state.errorMessage || micError) && (
+      {(state.errorMessage || micError || workerMicError) && (
         <div className="bg-amber-950/40 border-b border-amber-900 text-amber-200 text-xs px-4 py-2 flex justify-between items-center">
           <span>
             <span className="font-semibold tracking-wide uppercase text-[10px] mr-2 px-1.5 py-0.5 rounded border border-amber-700 bg-amber-950/60">
-              {micError ? "Mic Error" : "Notice"}
+              {micError ? "Caller Mic Error" : workerMicError ? "Worker Mic Error" : "Notice"}
             </span>
-            {micError ?? state.errorMessage}
+            {micError ?? workerMicError ?? state.errorMessage}
           </span>
           <button onClick={clearError} className="opacity-60 hover:opacity-100 px-2">
             <X size={14} />
@@ -140,6 +165,11 @@ export default function App() {
           callerLanguage={state.callerLanguage}
           callerLanguageName={state.callerLanguageName}
           playbackAudioUrl={state.playbackAudioUrl}
+          dialogueTurns={state.dialogueTurns}
+          callerInterimText={state.callerInterimText}
+          workerInterimText={state.workerInterimText}
+          workerMicActive={workerRecording}
+          onToggleWorkerMic={toggleWorkerMic}
         />
 
         <div className="flex flex-col min-h-0 border-r border-[var(--color-border)]">
