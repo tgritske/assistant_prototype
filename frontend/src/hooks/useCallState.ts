@@ -1,6 +1,7 @@
 import { useCallback, useReducer } from "react";
 import type {
   FormFields,
+  DialogueTurn,
   ScenarioSummary,
   ServerMessage,
   Suggestion,
@@ -19,6 +20,11 @@ export interface CallState {
   operatorTranscript: string;
   operatorTranscriptInterim: string;
   transcriptSegments: { text: string; start: number; end: number }[];
+  dialogueTurns: DialogueTurn[];
+  callerTranscript: string;
+  callerTranscriptInterim: string;
+  workerTranscript: string;
+  workerTranscriptInterim: string;
   form: FormFields;
   aiFilledFields: Set<string>;
   manualEdits: Set<string>;
@@ -51,6 +57,11 @@ export const INITIAL_STATE: CallState = {
   operatorTranscript: "",
   operatorTranscriptInterim: "",
   transcriptSegments: [],
+  dialogueTurns: [],
+  callerTranscript: "",
+  callerTranscriptInterim: "",
+  workerTranscript: "",
+  workerTranscriptInterim: "",
   form: {},
   aiFilledFields: new Set(),
   manualEdits: new Set(),
@@ -167,6 +178,15 @@ function reducer(state: CallState, action: Action): CallState {
               start: s.start,
               end: s.end,
             })),
+          };
+        case "dialogue_update":
+          return {
+            ...state,
+            dialogueTurns: m.turns,
+            callerTranscript: m.caller_text,
+            callerTranscriptInterim: m.caller_interim_text ?? "",
+            workerTranscript: m.worker_text,
+            workerTranscriptInterim: m.worker_interim_text ?? "",
           };
         case "form_update": {
           const form = { ...state.form, ...(m.fields as FormFields) };

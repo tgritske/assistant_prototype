@@ -31,7 +31,9 @@ class LLMBackend(Protocol):
     name: str
     model: str
 
-    async def extract(self, transcript: str) -> Optional[ClaudeExtraction]: ...
+    async def extract(
+        self, transcript: str, worker_context: str | None = None
+    ) -> Optional[ClaudeExtraction]: ...
     async def translate_phrases(
         self, target_language: str, source_phrases: list[str]
     ) -> list[str]: ...

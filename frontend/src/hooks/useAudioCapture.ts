@@ -48,9 +48,19 @@ function mergeChunks(chunks: Float32Array[], totalLen: number): Float32Array {
   return merged;
 }
 
-export function useAudioCapture(sendBinary: (data: ArrayBuffer) => boolean) {
+interface AudioCaptureOptions {
+  deviceId?: string | null;
+  echoCancellation?: boolean;
+  noiseSuppression?: boolean;
+}
+
+export function useAudioCapture(
+  sendBinary: (data: ArrayBuffer) => boolean,
+  options: AudioCaptureOptions = {}
+) {
   const [isRecording, setIsRecording] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [level, setLevel] = useState(0);
 
   const ctxRef = useRef<AudioContext | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -60,6 +70,8 @@ export function useAudioCapture(sendBinary: (data: ArrayBuffer) => boolean) {
   // Keep sendBinary stable across renders without re-registering the processor
   const sendRef = useRef(sendBinary);
   sendRef.current = sendBinary;
+  const optionsRef = useRef(options);
+  optionsRef.current = options;
 
   const stop = useCallback(() => {
     // Flush trailing tail BEFORE tearing the audio graph down. The RMS gate is
@@ -84,6 +96,7 @@ export function useAudioCapture(sendBinary: (data: ArrayBuffer) => boolean) {
     ctxRef.current = null;
     accRef.current = [];
     accLenRef.current = 0;
+    setLevel(0);
     setIsRecording(false);
   }, []);
 
@@ -91,7 +104,14 @@ export function useAudioCapture(sendBinary: (data: ArrayBuffer) => boolean) {
     setError(null);
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
-        audio: { echoCancellation: true, noiseSuppression: true, sampleRate: { ideal: TARGET_SR } },
+        audio: {
+          echoCancellation: optionsRef.current.echoCancellation ?? true,
+          noiseSuppression: optionsRef.current.noiseSuppression ?? true,
+          sampleRate: { ideal: TARGET_SR },
+          ...(optionsRef.current.deviceId
+            ? { deviceId: { exact: optionsRef.current.deviceId } }
+            : {}),
+        },
         video: false,
       });
       streamRef.current = stream;
@@ -114,8 +134,10 @@ export function useAudioCapture(sendBinary: (data: ArrayBuffer) => boolean) {
           const merged = mergeChunks(accRef.current, accLenRef.current);
           accRef.current = [];
           accLenRef.current = 0;
+          const rms = computeRMS(merged);
+          setLevel(rms);
           // Skip silent chunks — Whisper hallucinates language/text on silence
-          if (computeRMS(merged) >= SILENCE_RMS_THRESHOLD) {
+          if (rms >= SILENCE_RMS_THRESHOLD) {
             const downsampled = downsample(merged, ctx.sampleRate);
             sendRef.current(toInt16(downsampled));
           }
@@ -151,5 +173,5 @@ export function useAudioCapture(sendBinary: (data: ArrayBuffer) => boolean) {
 
   useEffect(() => () => stop(), [stop]);
 
-  return { isRecording, error, start, stop, flush };
+  return { isRecording, error, level, start, stop, flush };
 }

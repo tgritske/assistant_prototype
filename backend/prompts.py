@@ -12,6 +12,8 @@ RULES
 - Always return dispatcher-facing output in English, even when the caller is speaking another language.
 - Keep names, phone numbers, addresses, apartment numbers, and street names exactly as spoken when possible.
 - Use only facts present in the transcript. Ignore prior knowledge, scenario titles, examples, and likely defaults.
+- If a separate worker/dispatcher speech section is provided, treat it as context only. \
+Do not use worker speech as evidence for incident facts unless the same fact appears in caller speech.
 - Never invent facts. If the caller hasn't said a street name, do not add one.
 - `location` must contain only the dispatchable address, partial address, or place name spoken by the caller.
   Put floor, smoke, trapped people, cries, hazards, and other incident narrative in `description`, `hazards`, or `notes`.

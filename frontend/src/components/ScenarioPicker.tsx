@@ -14,6 +14,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import type { ScenarioSummary } from "../types/dispatch";
+import type { AudioInputDevice } from "../hooks/useAudioDevices";
 import { cn } from "../lib/utils";
 
 interface Props {
@@ -24,6 +25,9 @@ interface Props {
   onStop: () => void;
   onLiveMic?: () => void;
   micActive?: boolean;
+  audioDevices?: AudioInputDevice[];
+  callerDeviceId?: string;
+  onCallerDeviceChange?: (deviceId: string) => void;
   collapsed?: boolean;
   onToggleCollapse?: () => void;
 }
@@ -60,6 +64,9 @@ export function ScenarioPicker({
   onStop,
   onLiveMic,
   micActive,
+  audioDevices = [],
+  callerDeviceId = "",
+  onCallerDeviceChange,
   collapsed = false,
   onToggleCollapse,
 }: Props) {
@@ -104,7 +111,7 @@ export function ScenarioPicker({
             {liveMicMode ? (
               <span className="flex items-center gap-1.5 text-red-400">
                 <Mic size={11} className="animate-pulse" />
-                Live Mic
+                Caller Mic
               </span>
             ) : (
               "Demo Scenarios"
@@ -185,7 +192,23 @@ export function ScenarioPicker({
       </div>
 
       {onLiveMic && (
-        <div className="p-3 border-t border-[var(--color-border)]">
+        <div className="p-3 border-t border-[var(--color-border)] space-y-2">
+          {onCallerDeviceChange && audioDevices.length > 0 && (
+            <select
+              value={callerDeviceId}
+              onChange={(e) => onCallerDeviceChange(e.target.value)}
+              disabled={inCall}
+              className="w-full rounded-md px-2 py-1.5 text-[11px] bg-[var(--color-bg-panel)] border border-[var(--color-border)] text-[var(--color-text-muted)] outline-none focus:border-[var(--color-accent)] disabled:opacity-50"
+              title="Caller audio input"
+            >
+              <option value="">Default caller input</option>
+              {audioDevices.map((device) => (
+                <option key={device.deviceId} value={device.deviceId}>
+                  {device.label}
+                </option>
+              ))}
+            </select>
+          )}
           <button
             onClick={onLiveMic}
             disabled={inCall}
@@ -197,7 +220,7 @@ export function ScenarioPicker({
             )}
           >
             <Mic size={13} className={micActive ? "animate-pulse" : undefined} />
-            {micActive ? "Recording…" : "Use Live Microphone"}
+            {micActive ? "Caller Recording…" : "Use Caller Microphone"}
           </button>
         </div>
       )}

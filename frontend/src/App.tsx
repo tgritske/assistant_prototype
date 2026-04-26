@@ -8,6 +8,7 @@ import { SuggestionsPanel } from "./components/SuggestionsPanel";
 import { TranscriptPanel } from "./components/TranscriptPanel";
 import { TranslationPanel } from "./components/TranslationPanel";
 import { useAudioCapture } from "./hooks/useAudioCapture";
+import { useAudioDevices } from "./hooks/useAudioDevices";
 import { useCallState } from "./hooks/useCallState";
 import { useDispatchSocket } from "./hooks/useDispatchSocket";
 import type { FormFields } from "./types/dispatch";
@@ -16,10 +17,28 @@ export default function App() {
   const { state, onServerMessage, setConnected, editField, dismissSuggestion, clearError } =
     useCallState();
 
-  const { status, send, sendBinary } = useDispatchSocket({ onMessage: onServerMessage });
+  const { status, send, sendAudioChunk } = useDispatchSocket({ onMessage: onServerMessage });
+  const { devices: audioDevices, error: audioDeviceError } = useAudioDevices();
+  const [callerDeviceId, setCallerDeviceId] = useState("");
+  const [workerDeviceId, setWorkerDeviceId] = useState("");
 
-  const { isRecording, error: micError, start: startMic, stop: stopMic } =
-    useAudioCapture(sendBinary);
+  const {
+    isRecording: callerMicRecording,
+    error: callerMicError,
+    start: startCallerMic,
+    stop: stopCallerMic,
+  } = useAudioCapture((data) => sendAudioChunk("caller", data), {
+    deviceId: callerDeviceId || null,
+  });
+
+  const {
+    isRecording: workerMicRecording,
+    error: workerMicError,
+    start: startWorkerMic,
+    stop: stopWorkerMic,
+  } = useAudioCapture((data) => sendAudioChunk("worker", data), {
+    deviceId: workerDeviceId || null,
+  });
 
   useEffect(() => setConnected(status === "open"), [status, setConnected]);
 
@@ -45,8 +64,15 @@ export default function App() {
 
   // Stop mic when call ends (scenario finished or manual stop)
   useEffect(() => {
-    if (!state.inCall && isRecording) stopMic();
-  }, [state.inCall, isRecording, stopMic]);
+    if (!state.inCall && callerMicRecording) stopCallerMic();
+    if (!state.inCall && workerMicRecording) stopWorkerMic();
+  }, [
+    state.inCall,
+    callerMicRecording,
+    workerMicRecording,
+    stopCallerMic,
+    stopWorkerMic,
+  ]);
 
   const playScenario = useCallback(
     (id: string) => {
@@ -55,14 +81,24 @@ export default function App() {
     [send]
   );
   const stopCall = useCallback(() => {
-    stopMic();
+    stopCallerMic();
+    stopWorkerMic();
     send({ type: "stop_call" });
-  }, [send, stopMic]);
+  }, [send, stopCallerMic, stopWorkerMic]);
 
   const startLiveMic = useCallback(async () => {
     send({ type: "start_call", input_mode: "live_audio" });
-    await startMic();
-  }, [send, startMic]);
+    await startCallerMic();
+  }, [send, startCallerMic]);
+
+  const toggleWorkerMic = useCallback(async () => {
+    if (workerMicRecording) {
+      stopWorkerMic();
+      return;
+    }
+    if (!state.inCall) return;
+    await startWorkerMic();
+  }, [state.inCall, workerMicRecording, startWorkerMic, stopWorkerMic]);
 
   const sendManualEdit = useCallback(
     (field: keyof FormFields, value: unknown) => {
@@ -100,13 +136,13 @@ export default function App() {
         llmMode={state.llmMode}
       />
 
-      {(state.errorMessage || micError) && (
+      {(state.errorMessage || callerMicError || workerMicError || audioDeviceError) && (
         <div className="bg-amber-950/40 border-b border-amber-900 text-amber-200 text-xs px-4 py-2 flex justify-between items-center">
           <span>
             <span className="font-semibold tracking-wide uppercase text-[10px] mr-2 px-1.5 py-0.5 rounded border border-amber-700 bg-amber-950/60">
-              {micError ? "Mic Error" : "Notice"}
+              {callerMicError || workerMicError || audioDeviceError ? "Mic Error" : "Notice"}
             </span>
-            {micError ?? state.errorMessage}
+            {callerMicError ?? workerMicError ?? audioDeviceError ?? state.errorMessage}
           </span>
           <button onClick={clearError} className="opacity-60 hover:opacity-100 px-2">
             <X size={14} />
@@ -125,7 +161,10 @@ export default function App() {
           onPlay={playScenario}
           onStop={stopCall}
           onLiveMic={startLiveMic}
-          micActive={isRecording}
+          micActive={callerMicRecording}
+          audioDevices={audioDevices}
+          callerDeviceId={callerDeviceId}
+          onCallerDeviceChange={setCallerDeviceId}
           collapsed={!sidebarOpen}
           onToggleCollapse={() => setSidebarOpen((v) => !v)}
         />
@@ -135,11 +174,17 @@ export default function App() {
           interimText={state.operatorTranscriptInterim}
           originalTranscript={state.transcript}
           originalInterimText={state.transcriptInterim}
+          dialogueTurns={state.dialogueTurns}
           highlights={state.highlights}
           inCall={state.inCall}
           callerLanguage={state.callerLanguage}
           callerLanguageName={state.callerLanguageName}
           playbackAudioUrl={state.playbackAudioUrl}
+          workerMicActive={workerMicRecording}
+          onToggleWorkerMic={toggleWorkerMic}
+          audioDevices={audioDevices}
+          workerDeviceId={workerDeviceId}
+          onWorkerDeviceChange={setWorkerDeviceId}
         />
 
         <div className="flex flex-col min-h-0 border-r border-[var(--color-border)]">

@@ -54,15 +54,28 @@ class OpenAICompatBackend:
             default_headers=extra_headers or {},
         )
 
-    async def extract(self, transcript: str) -> Optional[ClaudeExtraction]:
+    async def extract(
+        self, transcript: str, worker_context: str | None = None
+    ) -> Optional[ClaudeExtraction]:
         if not transcript.strip():
             return None
 
-        user_message = (
-            "Current call transcript (in progress):\n"
-            f'"""\n{transcript}\n"""\n\n'
-            "Extract structured incident data. Use the extract_incident_data tool."
-        )
+        if worker_context and worker_context.strip():
+            user_message = (
+                "CALLER SPEECH - evidence for incident facts:\n"
+                f'"""\n{transcript}\n"""\n\n'
+                "WORKER SPEECH - context only. Do not use it as incident fact evidence:\n"
+                f'"""\n{worker_context.strip()}\n"""\n\n'
+                "Extract structured incident data from caller evidence. Use worker speech only "
+                "to avoid duplicate suggestions and understand which questions or instructions "
+                "were already given. Use the extract_incident_data tool."
+            )
+        else:
+            user_message = (
+                "Current caller transcript (in progress):\n"
+                f'"""\n{transcript}\n"""\n\n'
+                "Extract structured incident data. Use the extract_incident_data tool."
+            )
 
         try:
             response = await self.client.chat.completions.create(
