@@ -1106,6 +1106,10 @@ class CallSession:
             t_start = cumulative_sec
             t_end = cumulative_sec + turn_dur
             cumulative_sec = t_end
+            gap = float(turn_meta.get("gap_after_sec", 0.0))
+            if gap > 0 and pace_realtime:
+                await asyncio.sleep(gap)
+            cumulative_sec += gap
 
             seq, turn_id = self._next_turn_id()
             self.dialogue_turns.append(

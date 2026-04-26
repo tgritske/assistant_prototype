@@ -231,6 +231,30 @@ SCENARIOS: list[Scenario] = [
             DialogTurn("caller", "I see lights. I'm waving. Please get him out!"),
         ],
     ),
+    Scenario(
+        id="fire-real-dialog-01",
+        title="Kitchen fire — real call, occupant outside, husband inside",
+        description=(
+            "Very short real dialog. Caller escaped kitchen fire, husband still inside. "
+            "Short clipped sentences, high urgency."
+        ),
+        category="fire",
+        language="en-US",
+        voice="en-US-GuyNeural",
+        difficulty="medium",
+        dialog=[
+            DialogTurn("worker", ""),
+            DialogTurn("caller", ""),
+            DialogTurn("worker", ""),
+            DialogTurn("caller", ""),
+            DialogTurn("worker", ""),
+            DialogTurn("caller", ""),
+            DialogTurn("worker", ""),
+            DialogTurn("caller", ""),
+            DialogTurn("worker", ""),
+            DialogTurn("caller", ""),
+        ],
+    ),
 ]
 
 

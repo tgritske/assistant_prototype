@@ -1,0 +1,65 @@
+{
+  "scenario_id": "fire-real-dialog-01",
+  "turns": [
+    {
+      "index": 0,
+      "speaker": "worker",
+      "file": "turn_00_worker.mp3",
+			"gap_after_sec": 0.2
+    },
+    {
+      "index": 1,
+      "speaker": "caller",
+      "file": "turn_01_caller.mp3",
+			"gap_after_sec": 0.2
+    },
+    {
+      "index": 2,
+      "speaker": "worker",
+      "file": "turn_02_worker.mp3",
+			"gap_after_sec": 0.2
+    },
+    {
+      "index": 3,
+      "speaker": "caller",
+      "file": "turn_03_caller.mp3",
+			"gap_after_sec": 0.2
+    },
+    {
+      "index": 4,
+      "speaker": "worker",
+      "file": "turn_04_worker.mp3",
+			"gap_after_sec": 0.2
+    },
+    {
+      "index": 5,
+      "speaker": "caller",
+      "file": "turn_05_caller.mp3",
+			"gap_after_sec": 0.2
+    },
+    {
+      "index": 6,
+      "speaker": "worker",
+      "file": "turn_06_worker.mp3",
+			"gap_after_sec": 0.2
+    },
+    {
+      "index": 7,
+      "speaker": "caller",
+      "file": "turn_07_caller.mp3",
+			"gap_after_sec": 0.1
+    },
+    {
+      "index": 8,
+      "speaker": "worker",
+      "file": "turn_08_worker.mp3",
+			"gap_after_sec": 0.1
+    },
+    {
+      "index": 9,
+      "speaker": "caller",
+      "file": "turn_09_caller.mp3",
+			"gap_after_sec": 0.1
+    }
+  ]
+}
