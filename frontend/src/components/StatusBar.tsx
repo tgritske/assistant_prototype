@@ -65,9 +65,9 @@ export function StatusBar({
             {llmMode === "live" ? (llmBackend ?? "LLM") : "LOCAL RULES"}
           </Pill>
         )} */}
-        {callId && (
+        {/* {callId && (
           <div className="text-[10px] font-mono text-[var(--color-text-dim)]">#{callId}</div>
-        )}
+        )} */}
       </div>
     </header>
   );
