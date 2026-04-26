@@ -42,6 +42,25 @@ export const TranscriptSegmentSchema = z.object({
 
 export type TranscriptSegment = z.infer<typeof TranscriptSegmentSchema>;
 
+export const SpeakerSchema = z.enum(["caller", "worker"]);
+export type Speaker = z.infer<typeof SpeakerSchema>;
+
+export const DialogueTurnSchema = z.object({
+  id: z.string(),
+  seq: z.number().int(),
+  speaker: SpeakerSchema,
+  channel: z.string(),
+  source: z.enum(["whisper", "web_speech", "typed", "tts_request", "demo"]),
+  text: z.string(),
+  start: z.number(),
+  end: z.number(),
+  is_final: z.boolean().default(true),
+  language: z.string().nullable().optional(),
+  confidence: z.number().nullable().optional(),
+});
+
+export type DialogueTurn = z.infer<typeof DialogueTurnSchema>;
+
 export const ScenarioSummarySchema = z.object({
   id: z.string(),
   title: z.string(),
@@ -92,6 +111,16 @@ export const ServerMessageSchema = z.discriminatedUnion("type", [
     interim_text: z.string().nullable().optional(),
     operator_text: z.string().nullable().optional(),
     operator_interim_text: z.string().nullable().optional(),
+    language: z.string().nullable().optional(),
+  }),
+  z.object({
+    type: z.literal("dialogue_update"),
+    turns: z.array(DialogueTurnSchema),
+    caller_text: z.string(),
+    caller_interim_text: z.string().nullable().optional(),
+    worker_text: z.string(),
+    worker_interim_text: z.string().nullable().optional(),
+    full_text: z.string(),
     language: z.string().nullable().optional(),
   }),
   z.object({
