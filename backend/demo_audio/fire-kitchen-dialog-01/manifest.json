@@ -1,0 +1,75 @@
+{
+  "scenario_id": "fire-kitchen-dialog-01",
+  "turns": [
+    {
+      "index": 0,
+      "speaker": "worker",
+      "file": "turn_00_worker.mp3",
+      "text": "One-one-two, what's your emergency?",
+      "voice": "en-US-GuyNeural"
+    },
+    {
+      "index": 1,
+      "speaker": "caller",
+      "file": "turn_01_caller.mp3",
+      "text": "My kitchen is on fire! I got out. My husband is still inside!",
+      "voice": "en-US-JennyNeural"
+    },
+    {
+      "index": 2,
+      "speaker": "worker",
+      "file": "turn_02_worker.mp3",
+      "text": "What's the address?",
+      "voice": "en-US-GuyNeural"
+    },
+    {
+      "index": 3,
+      "speaker": "caller",
+      "file": "turn_03_caller.mp3",
+      "text": "Sixty-two Halston Ave. Single story, brown roof. His name is Ray, he's sixty-five.",
+      "voice": "en-US-JennyNeural"
+    },
+    {
+      "index": 4,
+      "speaker": "worker",
+      "file": "turn_04_worker.mp3",
+      "text": "Firefighters are on the way. Is he mobile?",
+      "voice": "en-US-GuyNeural"
+    },
+    {
+      "index": 5,
+      "speaker": "caller",
+      "file": "turn_05_caller.mp3",
+      "text": "He uses a walker. He was in the back bedroom when I ran out!",
+      "voice": "en-US-JennyNeural"
+    },
+    {
+      "index": 6,
+      "speaker": "worker",
+      "file": "turn_06_worker.mp3",
+      "text": "Stay back. Don't go in. Which side is the bedroom?",
+      "voice": "en-US-GuyNeural"
+    },
+    {
+      "index": 7,
+      "speaker": "caller",
+      "file": "turn_07_caller.mp3",
+      "text": "Left side of the house. Window faces the yard. Hurry, the smoke is everywhere!",
+      "voice": "en-US-JennyNeural"
+    },
+    {
+      "index": 8,
+      "speaker": "worker",
+      "file": "turn_08_worker.mp3",
+      "text": "Crew is one minute out. Wave them to the left side.",
+      "voice": "en-US-GuyNeural"
+    },
+    {
+      "index": 9,
+      "speaker": "caller",
+      "file": "turn_09_caller.mp3",
+      "text": "I see lights. I'm waving. Please get him out!",
+      "voice": "en-US-JennyNeural"
+    }
+  ]
+}
