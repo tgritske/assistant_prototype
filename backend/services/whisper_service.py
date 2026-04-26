@@ -25,7 +25,9 @@ MODEL_SIZE = os.environ.get("WHISPER_MODEL", "small")
 # Override with WHISPER_MODEL=tiny|base|medium.
 COMPUTE_TYPE = os.environ.get("WHISPER_COMPUTE_TYPE", "int8")
 DEVICE = os.environ.get("WHISPER_DEVICE", "auto")
-BEAM_SIZE = int(os.environ.get("WHISPER_BEAM_SIZE", "5"))
+BEAM_SIZE = int(os.environ.get("WHISPER_BEAM_SIZE", "1"))
+# Final/file-pass decoding does not need to be fast; preserve quality there.
+FILE_BEAM_SIZE = int(os.environ.get("WHISPER_FILE_BEAM_SIZE", "5"))
 
 SAMPLE_RATE = 16000
 
@@ -151,7 +153,7 @@ class WhisperService:
         segments, info = self.model.transcribe(
             file_path,
             language=language,
-            beam_size=BEAM_SIZE,
+            beam_size=FILE_BEAM_SIZE,
             vad_filter=True,
             vad_parameters={"min_silence_duration_ms": 300},
             condition_on_previous_text=False,

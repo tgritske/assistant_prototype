@@ -13,6 +13,27 @@ from services.form_normalizer import normalize_detected_language, normalize_form
 log = logging.getLogger(__name__)
 
 MODEL = os.environ.get("CLAUDE_MODEL", "claude-sonnet-4-6")
+# Translation runs on every new caller turn; Haiku is fast enough and cheap.
+TRANSLATE_MODEL = os.environ.get(
+    "CLAUDE_TRANSLATE_MODEL", "claude-haiku-4-5-20251001"
+)
+
+TRANSLATE_TEXT_SYSTEM = (
+    "You translate live emergency-dispatch audio transcripts to the requested "
+    "target language. Return ONLY the translation, no commentary, no quotes, "
+    "no leading/trailing whitespace beyond the translation itself. Use natural "
+    "phrasing for a live emergency call. Preserve all addresses, names, "
+    "numbers, units of measure, and the urgency conveyed in the source. "
+    "If the source already matches the target language, return it unchanged."
+)
+
+TRANSLATE_PHRASES_SYSTEM = (
+    "You translate dispatcher phrases to the requested target language for an "
+    "emergency call where the caller does not speak English. Use natural, "
+    "clear wording the caller will understand immediately. Preserve urgency, "
+    "names, numbers, and addresses. Return one translation per input line, in "
+    "the same order, with no numbering, prefixes, or extra commentary."
+)
 
 
 class ClaudeService:
@@ -102,19 +123,24 @@ class ClaudeService:
         if not source_phrases:
             return []
 
-        prompt = (
-            f"Translate these emergency-dispatch phrases to {target_language}. "
-            "Use natural, clear wording a caller will understand immediately. "
-            "Preserve urgency, names, numbers, and addresses. "
-            "Return them one per line in the same order, nothing else.\n\n"
+        user_message = (
+            f"Target language: {target_language}\n"
+            "Phrases (one per line):\n"
             + "\n".join(source_phrases)
         )
 
         try:
             response = await self.client.messages.create(
-                model=self.model,
+                model=TRANSLATE_MODEL,
                 max_tokens=800,
-                messages=[{"role": "user", "content": prompt}],
+                system=[
+                    {
+                        "type": "text",
+                        "text": TRANSLATE_PHRASES_SYSTEM,
+                        "cache_control": {"type": "ephemeral"},
+                    }
+                ],
+                messages=[{"role": "user", "content": user_message}],
             )
             text = response.content[0].text.strip()
             lines = [ln.strip() for ln in text.split("\n") if ln.strip()]
@@ -132,18 +158,27 @@ class ClaudeService:
         if not text.strip():
             return text
 
-        source_hint = f" from {source_language}" if source_language else ""
-        prompt = (
-            f"Translate the following emergency-dispatch text{source_hint} to {target_language}. "
-            "Return only the translation. Use natural phrasing for a live emergency call. "
-            "Preserve addresses, names, numbers, and emergency meaning.\n\n"
+        source_hint = (
+            f"Source language: {source_language}\n" if source_language else ""
+        )
+        user_message = (
+            f"{source_hint}"
+            f"Target language: {target_language}\n"
+            "Source text:\n"
             f"{text}"
         )
         try:
             response = await self.client.messages.create(
-                model=self.model,
+                model=TRANSLATE_MODEL,
                 max_tokens=1000,
-                messages=[{"role": "user", "content": prompt}],
+                system=[
+                    {
+                        "type": "text",
+                        "text": TRANSLATE_TEXT_SYSTEM,
+                        "cache_control": {"type": "ephemeral"},
+                    }
+                ],
+                messages=[{"role": "user", "content": user_message}],
             )
             translated = response.content[0].text.strip()
             return translated or text

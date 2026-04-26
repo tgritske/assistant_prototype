@@ -57,9 +57,10 @@ SILENCE_TRIGGER_SEC = 0.3  # seconds of silence since last new speech
 MIN_CLAUDE_INTERVAL_SEC = 1.5  # hard floor between consecutive Claude calls
 
 # Minimum new audio before calling Whisper for live mic. Shorter chunks feel
-# faster but often drop street names and proper nouns; 3s is the current
-# quality/latency tradeoff for local faster-whisper on noisy microphone audio.
-LIVE_MIN_SEC = float(os.environ.get("LIVE_WHISPER_CHUNK_SEC", "3.0"))
+# faster but often drop street names and proper nouns. 1.2s + the trailing
+# initial_prompt context gives near-instant UI updates with acceptable accuracy
+# on `base`/`small`. Bump back to ~2.0s if proper-noun loss is unacceptable.
+LIVE_MIN_SEC = float(os.environ.get("LIVE_WHISPER_CHUNK_SEC", "1.2"))
 
 app = FastAPI(title="Emergency Dispatch AI Assistant")
 
@@ -439,8 +440,10 @@ class CallSession:
             )
             if dialogue_changed:
                 await self._send_dialogue_update()
-            if self.operator_transcript_for_extraction.strip():
-                self._schedule_claude()
+            # Extraction is scheduled alongside translation at every call site
+            # (see _schedule_translation / _schedule_claude pairs). Re-running
+            # extraction here would serialize the dispatch-form fill behind
+            # each translation pass.
         finally:
             if self._call_epoch == epoch and self._translation_rerun_queued:
                 self._translation_rerun_queued = False
