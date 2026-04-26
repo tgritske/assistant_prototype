@@ -11,7 +11,7 @@ This prototype is a real-time emergency dispatch co-pilot:
 ## Project structure
 
 ```text
-prototype/
+assistant_prototype/
 ├── backend/   # FastAPI + Whisper + LLM routing + TTS
 ├── frontend/  # React + Vite UI
 └── run.sh     # helper script to start both services
@@ -44,7 +44,7 @@ npm --version
 
 ```bash
 git clone <YOUR_REPO_URL>
-cd prototype
+cd assistant_prototype
 ```
 
 ### 3. Create the backend virtual environment
@@ -67,23 +67,34 @@ cd ..
 
 ### 5. Create the backend environment file
 
-Copy the example file and edit it if needed:
+Copy the example file:
 
 ```bash
 cp backend/.env.example backend/.env
 ```
 
-By default, the app prefers Claude when `ANTHROPIC_API_KEY` is set.
-If Claude is not configured, it can fall back to Ollama if you install and start it.
-If neither is available, it falls back to rule-based extraction.
+Minimum required to get a working LLM: paste your Claude key into `backend/.env`:
 
-Put this into `backend/.env` to use Claude API:
+```env
+ANTHROPIC_API_KEY=sk-ant-...
+```
 
-- `ANTHROPIC_API_KEY=...`
+Defaults work for everything else. By default the app prefers Claude when `ANTHROPIC_API_KEY` is set, falls back to Ollama if running, then to rule-based extraction.
 
-### 6. Generate demo audio if needed
+Other knobs in `.env.example` (only touch if you want to change defaults):
 
-Demo audio is already included in this repo. If you want to regenerate it:
+- `LLM_BACKEND=auto|claude|ollama|none` — force a backend
+- `CLAUDE_MODEL`, `CLAUDE_TRANSLATE_MODEL` — model overrides
+- `OLLAMA_HOST`, `OLLAMA_MODEL` — local LLM
+- `WHISPER_MODEL`, `WHISPER_COMPUTE_TYPE`, `WHISPER_DEVICE`, `WHISPER_BEAM_SIZE` — STT tuning
+- `LIVE_WHISPER_CHUNK_SEC` — live mic chunk size
+- `STT_PROVIDER=whisper|reson8` — switch to Reson8 cloud STT (then set `RESON8_API_KEY`)
+
+### 6. Demo audio
+
+Demo MP3s are already committed in `backend/demo_audio/`. No action needed.
+
+To regenerate (needs internet, uses `edge-tts`):
 
 ```bash
 cd backend
@@ -91,8 +102,6 @@ source .venv/bin/activate
 python generate_demos.py
 cd ..
 ```
-
-This step needs internet access because `edge-tts` uses Microsoft voices online.
 
 ## LLM Backend Options
 
@@ -216,7 +225,7 @@ Make sure backend is running on `http://localhost:8000`.
 
 ### Whisper model downloads on first run
 
-This is expected. Models are cached under [backend/models](/Users/rhaenyes/mine/cs_education/antropic_whale_hackaton/prototype/backend/models).
+This is expected. Models are cached under `backend/models/`.
 
 ### Demo audio missing
 
