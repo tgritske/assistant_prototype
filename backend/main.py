@@ -1685,6 +1685,28 @@ async def _handle_text(session: CallSession, raw: str):
                 "audio_base64": base64.b64encode(audio).decode(),
             }
         )
+        # Append worker dialogue turn so the played phrase appears in chat.
+        # `text` is the English original the dispatcher requested; `spoken_text`
+        # is what the caller hears (translated when target != en).
+        if session.started:
+            t_now = time.monotonic()
+            seq, turn_id = session._next_turn_id()
+            session.dialogue_turns.append(
+                DialogueTurn(
+                    id=turn_id,
+                    seq=seq,
+                    speaker="worker",
+                    channel="worker_text",
+                    source="tts_request",
+                    text=text,
+                    start=t_now,
+                    end=t_now,
+                    is_final=True,
+                    language="en",
+                )
+            )
+            await session._send_dialogue_update()
+            session._schedule_claude()
 
     elif t == "live_transcript":
         if not session.started:
